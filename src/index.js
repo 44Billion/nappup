@@ -28,13 +28,14 @@ export default async function toApp (fileList, nostrSigner, { log = () => {}, ap
       nmmr.append(chunk)
     }
     if (chunkLength) {
-      const filename = '/' + file.webkitRelativePath.split('/').slice(1).join('/')
+      // remove root dir
+      const filename = file.webkitRelativePath.split('/').slice(1).join('/')
       log(`Uploading ${chunkLength} file parts of ${filename}`)
-      await uploadBinaryDataChunks(nmmr, nostrSigner, { mimeType: file.type })
+      await uploadBinaryDataChunks(nmmr, nostrSigner, { mimeType: file.type || 'application/octet-stream' })
       fileMetadata.push({
         rootHash: nmmr.getRoot(),
         filename,
-        mimeType: file.type
+        mimeType: file.type || 'application/octet-stream'
       })
     }
   }

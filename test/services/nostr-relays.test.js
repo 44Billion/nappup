@@ -3,7 +3,7 @@ import { describe, it, before, after } from 'node:test'
 import { NostrRelays, freeRelays } from '#services/nostr-relays.js'
 import NostrSigner from '#services/nostr-signer.js'
 
-describe.skip('relays', () => {
+describe('relays', () => {
   let relays
 
   before(() => {
