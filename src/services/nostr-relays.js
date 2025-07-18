@@ -1,7 +1,8 @@
 import { Relay } from 'nostr-tools/relay'
+import { maybeUnref } from '#helpers/timer.js'
 
 export const seedRelays = [
-  'wss://purpagepag.es',
+  'wss://purplepag.es',
   'wss://user.kindpag.es',
   'wss://relay.nos.social',
   'wss://relay.nostr.band',
@@ -25,7 +26,7 @@ export class NostrRelays {
   async #getRelay (url) {
     if (this.#relays.has(url)) {
       clearTimeout(this.#relayTimeouts.get(url))
-      this.#relayTimeouts.set(url, setTimeout(() => this.disconnect(url), this.#timeout))
+      this.#relayTimeouts.set(url, maybeUnref(setTimeout(() => this.disconnect(url), this.#timeout)))
       return this.#relays.get(url)
     }
 
@@ -34,7 +35,7 @@ export class NostrRelays {
 
     await relay.connect()
 
-    this.#relayTimeouts.set(url, setTimeout(() => this.disconnect(url), this.#timeout))
+    this.#relayTimeouts.set(url, maybeUnref(setTimeout(() => this.disconnect(url), this.#timeout)))
 
     return relay
   }
@@ -76,10 +77,10 @@ export class NostrRelays {
               resolve()
             }
           })
-          const timer = setTimeout(() => {
+          const timer = maybeUnref(setTimeout(() => {
             sub.close()
             resolve()
-          }, timeout)
+          }, timeout))
         })
       } catch (error) {
         console.error(`Failed to get events from ${url}`, error)
@@ -96,9 +97,9 @@ export class NostrRelays {
     const promises = relays.map(async (url) => {
       try {
         const relay = await this.#getRelay(url)
-        const timer = setTimeout(() => {
+        const timer = maybeUnref(setTimeout(() => {
           throw new Error(`Timeout sending event to ${url}`)
-        }, timeout)
+        }, timeout))
         await relay.publish(event)
         clearTimeout(timer)
       } catch (error) {

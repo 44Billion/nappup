@@ -48,7 +48,7 @@ export default class NostrSigner {
   async getRelays () {
     if (this.relays) return this.relays
 
-    const relayLists = await nostrRelays.getEvent({ authors: [await this.getPublicKey()], kind: 10002, limit: 1 }, seedRelays)
+    const relayLists = await nostrRelays.getEvents({ authors: [await this.getPublicKey()], kinds: [10002], limit: 1 }, seedRelays)
     const relayList = relayLists.sort((a, b) => b.created_at - a.created_at)[0]
     const rTags = relayList.tags.filter(v => v[0] === 'r' && /^wss?:\/\//.test(v[1]))
     if (rTags.length === 0) return (this.relays = await this.#initRelays())

@@ -13,4 +13,4 @@ await confirmDir(dir)
 
 const fileList = await toFileList(getFiles(dir), dir)
 
-await toApp(fileList, new NostrSigner(sk), { log: console.log.bind(console), appId })
+await toApp(fileList, await NostrSigner.create(sk), { log: console.log.bind(console), appId })

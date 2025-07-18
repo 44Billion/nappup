@@ -5,10 +5,17 @@ import nostrRelays from '#services/nostr-relays.js'
 import NostrSigner from '#services/nostr-signer.js'
 import { streamToChunks } from '#helpers/stream.js'
 
-export default async function toApp (fileList, nostrSigner, { log = () => {}, appId } = {}) {
+export default async function (...args) {
+  try {
+    return await toApp(...args)
+  } finally {
+    await nostrRelays.disconnectAll()
+  }
+}
+export async function toApp (fileList, nostrSigner, { log = () => {}, appId } = {}) {
   if (!nostrSigner && typeof window !== 'undefined') nostrSigner = window.nostr
   if (!nostrSigner) throw new Error('No Nostr signer found')
-  if (nostrSigner === window.nostr) {
+  if (typeof window !== 'undefined' && nostrSigner === window.nostr) {
     nostrSigner.getRelays = NostrSigner.prototype.getRelays
   }
 
@@ -52,6 +59,7 @@ export default async function toApp (fileList, nostrSigner, { log = () => {}, ap
   log(`Visit at https://44billion.net/${naddr}`)
 }
 
+// TODO: check if there are different c tags to keep
 async function uploadBinaryDataChunks (nmmr, signer, { mimeType } = {}) {
   const writeRelays = (await signer.getRelays()).write
   for await (const chunk of nmmr.getChunks()) {
@@ -77,7 +85,7 @@ async function uploadBundle (appId, fileMetadata, signer) {
     kind: 37448,
     tags: [
       ['d', appId],
-      fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType])
+      ...fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType])
     ],
     content: '',
     created_at: Math.floor(Date.now() / 1000)
