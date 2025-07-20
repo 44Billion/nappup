@@ -20,7 +20,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, appId } = 
   }
 
   appId ||= fileList[0].webkitRelativePath.split('/')[0]
-  appId = appId.trim().replace(/[\s-]/g, '').toLowerCase().slice(0, 32)
+    .trim().replace(/[\s-]/g, '').toLowerCase().slice(0, 32)
   let nmmr
   const fileMetadata = []
 
