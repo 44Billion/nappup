@@ -1,11 +1,12 @@
 {
   "name": "nappup",
-  "author": "Arthur França",
+  "author": "Arthur França - nostr:npub1l3cgtsurhfchg4cyhhqudm70074sr96srhje330xc5m6czej5n9s9q6vs2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/44billion/nappup.git"
   },
-  "version": "1.0.0",
+  "license": "GPL-3.0-or-later",
+  "version": "1.0.3",
   "description": "Nostr App Uploader",
   "type": "module",
   "scripts": {
