@@ -1,16 +1,18 @@
 {
   "name": "nappup",
   "author": "Arthur França",
-  "repository": "github:44billion/nappup",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/44billion/nappup.git"
+  },
   "version": "1.0.0",
   "description": "Nostr App Uploader",
-  "main": "index.js",
   "type": "module",
   "scripts": {
     "test": "node --test 'test/**/*.test.js'"
   },
   "bin": {
-    "nappup": "./bin/nappup/index.js"
+    "nappup": "bin/nappup/index.js"
   },
   "dependencies": {
     "dotenv": "^17.2.0",
@@ -33,5 +35,22 @@
     ],
     "#helpers/*": "./src/helpers/*",
     "#services/*": "./src/services/*"
-  }
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "keywords": [
+    "nostr",
+    "app",
+    "uploader",
+    "upload"
+  ],
+  "files": [
+    "src",
+    "src/helpers",
+    "src/services",
+    "lib",
+    "bin",
+    "bin/nappup"
+  ]
 }
