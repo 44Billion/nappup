@@ -12,7 +12,7 @@ export default async function (...args) {
     await nostrRelays.disconnectAll()
   }
 }
-export async function toApp (fileList, nostrSigner, { log = () => {}, appId } = {}) {
+export async function toApp (fileList, nostrSigner, { log = () => {}, appId, channel = 'main' } = {}) {
   if (!nostrSigner && typeof window !== 'undefined') nostrSigner = window.nostr
   if (!nostrSigner) throw new Error('No Nostr signer found')
   if (typeof window !== 'undefined' && nostrSigner === window.nostr) {
@@ -48,7 +48,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, appId } = 
   }
 
   log(`Uploading bundle #${appId}`)
-  const bundle = await uploadBundle(appId, fileMetadata, nostrSigner)
+  const bundle = await uploadBundle(appId, channel, fileMetadata, nostrSigner)
 
   const naddr = naddrEncode({
     identifier: bundle.tags.find(v => v[0] === 'd')[1],
@@ -110,9 +110,14 @@ async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signe
     })
 }
 
-async function uploadBundle (appId, fileMetadata, signer) {
+async function uploadBundle (appId, channel, fileMetadata, signer) {
+  const kind = {
+    main: 37448, // stable
+    next: 37449, // insider
+    draft: 37450 // vibe coded preview
+  }[channel] ?? 37448
   const appBundle = {
-    kind: 37448,
+    kind,
     tags: [
       ['d', appId],
       ...fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType])

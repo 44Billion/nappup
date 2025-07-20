@@ -9,6 +9,7 @@ export function parseArgs (args) {
   let dir = null
   let sk = null
   let appId = null
+  let channel = null
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-s' && args[i + 1]) {
@@ -17,6 +18,12 @@ export function parseArgs (args) {
     } else if (args[i] === '-i' && args[i + 1]) {
       appId = args[i + 1]
       i++
+    } else if (args[i] === '--main' && channel === null) {
+      channel = 'main'
+    } else if (args[i] === '--next' && channel === null) {
+      channel = 'next'
+    } else if (args[i] === '--draft' && channel === null) {
+      channel = 'draft'
     } else if (!args[i].startsWith('-') && dir === null) {
       dir = args[i]
     }
@@ -25,11 +32,12 @@ export function parseArgs (args) {
   return {
     dir: path.resolve(dir ?? '.'),
     sk,
-    appId
+    appId,
+    channel: channel || 'main'
   }
 }
 
-export async function confirmDir (dir) {
+export async function confirmArgs (args) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
@@ -37,7 +45,9 @@ export async function confirmDir (dir) {
   function askQuestion (query) {
     return new Promise(resolve => rl.question(query, resolve))
   }
-  const answer = await askQuestion(`Publish app from '${dir}'? (y/n) `)
+  const answer = await askQuestion(
+    `Publish app from '${args.dir}' to the ${args.channel} release channel? (y/n) `
+  )
   if (answer.toLowerCase() !== 'y') {
     console.log('Operation cancelled by user.')
     rl.close()

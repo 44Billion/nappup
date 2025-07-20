@@ -6,7 +6,10 @@ import { getConversationKey, encrypt, decrypt } from 'nostr-tools/nip44'
 import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
-dotenv.config({ path: process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env` })
+dotenv.config({
+  path: process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env`,
+  quiet: true
+})
 
 const nip44 = {
   getConversationKey,
