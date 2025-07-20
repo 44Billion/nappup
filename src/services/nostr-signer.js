@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as dotenv from 'dotenv'
 import { getPublicKey, finalizeEvent } from 'nostr-tools/pure'
@@ -6,8 +7,9 @@ import { getConversationKey, encrypt, decrypt } from 'nostr-tools/nip44'
 import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
+const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env`
 dotenv.config({
-  path: process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env`,
+  path: dotenvPath,
   quiet: true
 })
 
@@ -40,7 +42,7 @@ export default class NostrSigner {
     } else {
       isNewSk = true
       skHex = generateSecretKey()
-      fs.appendFileSync('.env', `NOSTR_SECRET_KEY=${skHex}\n`)
+      fs.appendFileSync(path.resolve(dotenvPath), `NOSTR_SECRET_KEY=${skHex}\n`)
       skBytes = hexToBytes(skHex)
     }
     const ret = new this(createToken, skBytes)
