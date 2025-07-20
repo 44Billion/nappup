@@ -59,15 +59,18 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, appId } = 
   log(`Visit at https://44billion.net/${naddr}`)
 }
 
-// TODO: check if there are different c tags to keep
 async function uploadBinaryDataChunks (nmmr, signer, { mimeType } = {}) {
   const writeRelays = (await signer.getRelays()).write
   for await (const chunk of nmmr.getChunks()) {
+    const dTag = chunk.x
+    const currentCtag = `${chunk.rootX}:${chunk.index}`
+    const prevCTags = await getPreviousCtags(dTag, currentCtag, writeRelays, signer)
     const binaryDataChunk = {
       kind: 34600,
       tags: [
-        ['d', chunk.x],
-        ['c', `${chunk.rootX}:${chunk.index}`, chunk.length, ...chunk.proof],
+        ['d', dTag],
+        ...prevCTags,
+        ['c', currentCtag, chunk.length, ...chunk.proof],
         ...(mimeType ? [['m', mimeType]] : [])
       ],
       // These chunks already have the expected size of 54600 bytes
@@ -78,6 +81,33 @@ async function uploadBinaryDataChunks (nmmr, signer, { mimeType } = {}) {
     const event = await signer.signEvent(binaryDataChunk)
     await nostrRelays.sendEvent(event, writeRelays)
   }
+}
+
+async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signer) {
+  const storedEvents = await nostrRelays.getEvents({
+    kinds: [34600],
+    authors: [await signer.getPublicKey()],
+    '#d': [dTagValue],
+    limit: 1
+  }, writeRelays)
+  if (storedEvents.length === 0) return []
+
+  const cTagValues = { [currentCtagValue]: true }
+  const prevTags = storedEvents.sort((a, b) => b.created_at - a.created_at)[0].tags
+  if (!Array.isArray(prevTags)) return []
+  return prevTags
+    .filter(v => {
+      const isCTag =
+        Array.isArray(v) &&
+        v[0] === 'c' &&
+        typeof v[1] === 'string' &&
+        /^[0-9a-f]{64}:\d+$/.test(v[1])
+      if (!isCTag) return false
+
+      const isntDuplicate = !cTagValues[v[1]]
+      cTagValues[v[1]] = true
+      return isCTag && isntDuplicate
+    })
 }
 
 async function uploadBundle (appId, fileMetadata, signer) {
