@@ -1,4 +1,3 @@
-
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import { isNostrAppIdSafe, deriveNostrAppId } from '#helpers/app.js'
