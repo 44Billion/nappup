@@ -5,6 +5,7 @@ import * as dotenv from 'dotenv'
 import { getPublicKey, finalizeEvent } from 'nostr-tools/pure'
 import { getConversationKey, encrypt, decrypt } from 'nostr-tools/nip44'
 import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
+import { bytesToHex, hexToBytes } from '#helpers/byte.js'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env`
@@ -130,22 +131,6 @@ export default class NostrSigner {
     const conversationKey = nip44.getConversationKey(this.#secretKey, pubkey)
     return nip44.decrypt(conversationKey, ciphertext)
   }
-}
-
-function bytesToHex (uint8aBytes) {
-  return Array.from(uint8aBytes).map(b => b.toString(16).padStart(2, '0')).join('')
-}
-
-function hexToBytes (hexString) {
-  const arr = new Uint8Array(hexString.length / 2) // create result array
-  for (let i = 0; i < arr.length; i++) {
-    const j = i * 2
-    const h = hexString.slice(j, j + 2)
-    const b = Number.parseInt(h, 16) // byte, created from string part
-    if (Number.isNaN(b) || b < 0) throw new Error('invalid hex')
-    arr[i] = b
-  }
-  return arr
 }
 
 function generateSecretKey () {

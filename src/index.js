@@ -4,6 +4,7 @@ import Base122Encoder from '#services/base122-encoder.js'
 import nostrRelays from '#services/nostr-relays.js'
 import NostrSigner from '#services/nostr-signer.js'
 import { streamToChunks } from '#helpers/stream.js'
+import { isNostrAppIdSafe, deriveNostrAppId } from '#helpers/app.js'
 
 export default async function (...args) {
   try {
@@ -12,6 +13,7 @@ export default async function (...args) {
     await nostrRelays.disconnectAll()
   }
 }
+
 export async function toApp (fileList, nostrSigner, { log = () => {}, appId, channel = 'main' } = {}) {
   if (!nostrSigner && typeof window !== 'undefined') nostrSigner = window.nostr
   if (!nostrSigner) throw new Error('No Nostr signer found')
@@ -19,8 +21,12 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, appId, cha
     nostrSigner.getRelays = NostrSigner.prototype.getRelays
   }
 
-  appId ||= fileList[0].webkitRelativePath.split('/')[0]
-    .trim().replace(/[\s-]/g, '').toLowerCase().slice(0, 32)
+  if (typeof appId === 'string') {
+    if (!isNostrAppIdSafe(appId)) throw new Error('appId should be [A-Za-z0-9] with length ranging from 1 to 19')
+  } else {
+    appId = fileList[0].webkitRelativePath.split('/')[0].trim()
+    if (!isNostrAppIdSafe(appId)) appId = deriveNostrAppId(appId || Math.random().toString(36))
+  }
   let nmmr
   const fileMetadata = []
 
