@@ -8,15 +8,15 @@ import { fileTypeFromFile } from 'file-type'
 export function parseArgs (args) {
   let dir = null
   let sk = null
-  let appId = null
+  let dTag = null
   let channel = null
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-s' && args[i + 1]) {
       sk = args[i + 1]
       i++ // Skip the next argument as it's part of -k
-    } else if (args[i] === '-i' && args[i + 1]) {
-      appId = args[i + 1]
+    } else if (args[i] === '-d' && args[i + 1]) {
+      dTag = args[i + 1]
       i++
     } else if (args[i] === '--main' && channel === null) {
       channel = 'main'
@@ -32,7 +32,7 @@ export function parseArgs (args) {
   return {
     dir: path.resolve(dir ?? '.'),
     sk,
-    appId,
+    dTag,
     channel: channel || 'main'
   }
 }

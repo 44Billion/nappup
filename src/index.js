@@ -1,10 +1,10 @@
 import NMMR from 'nmmr'
-import { naddrEncode } from 'nostr-tools/nip19'
+import { appEncode } from '#helpers/nip19.js'
 import Base122Encoder from '#services/base122-encoder.js'
 import nostrRelays from '#services/nostr-relays.js'
 import NostrSigner from '#services/nostr-signer.js'
 import { streamToChunks } from '#helpers/stream.js'
-import { isNostrAppIdSafe, deriveNostrAppId } from '#helpers/app.js'
+import { isNostrAppDTagSafe, deriveNostrAppDTag } from '#helpers/app.js'
 
 export default async function (...args) {
   try {
@@ -14,18 +14,18 @@ export default async function (...args) {
   }
 }
 
-export async function toApp (fileList, nostrSigner, { log = () => {}, appId, channel = 'main' } = {}) {
+export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, channel = 'main' } = {}) {
   if (!nostrSigner && typeof window !== 'undefined') nostrSigner = window.nostr
   if (!nostrSigner) throw new Error('No Nostr signer found')
   if (typeof window !== 'undefined' && nostrSigner === window.nostr) {
     nostrSigner.getRelays = NostrSigner.prototype.getRelays
   }
 
-  if (typeof appId === 'string') {
-    if (!isNostrAppIdSafe(appId)) throw new Error('appId should be [A-Za-z0-9] with length ranging from 1 to 19')
+  if (typeof dTag === 'string') {
+    if (!isNostrAppDTagSafe(dTag)) throw new Error('dTag should be [A-Za-z0-9] with length ranging from 1 to 19')
   } else {
-    appId = fileList[0].webkitRelativePath.split('/')[0].trim()
-    if (!isNostrAppIdSafe(appId)) appId = deriveNostrAppId(appId || Math.random().toString(36))
+    dTag = fileList[0].webkitRelativePath.split('/')[0].trim()
+    if (!isNostrAppDTagSafe(dTag)) dTag = deriveNostrAppDTag(dTag || Math.random().toString(36))
   }
   let nmmr
   const fileMetadata = []
@@ -53,16 +53,16 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, appId, cha
     }
   }
 
-  log(`Uploading bundle #${appId}`)
-  const bundle = await uploadBundle(appId, channel, fileMetadata, nostrSigner)
+  log(`Uploading bundle #${dTag}`)
+  const bundle = await uploadBundle(dTag, channel, fileMetadata, nostrSigner)
 
-  const naddr = naddrEncode({
-    identifier: bundle.tags.find(v => v[0] === 'd')[1],
+  const appEntity = appEncode({
+    dTag: bundle.tags.find(v => v[0] === 'd')[1],
     pubkey: bundle.pubkey,
     relays: [],
     kind: bundle.kind
   })
-  log(`Visit at https://44billion.net/${naddr}`)
+  log(`Visit at https://44billion.net/${appEntity}`)
 }
 
 async function uploadBinaryDataChunks (nmmr, signer, { mimeType } = {}) {
@@ -93,7 +93,7 @@ async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signe
   const storedEvents = await nostrRelays.getEvents({
     kinds: [34600],
     authors: [await signer.getPublicKey()],
-    '#d': [dTagValue],
+    dTag: [dTagValue],
     limit: 1
   }, writeRelays)
   if (storedEvents.length === 0) return []
@@ -116,7 +116,7 @@ async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signe
     })
 }
 
-async function uploadBundle (appId, channel, fileMetadata, signer) {
+async function uploadBundle (dTag, channel, fileMetadata, signer) {
   const kind = {
     main: 37448, // stable
     next: 37449, // insider
@@ -125,7 +125,7 @@ async function uploadBundle (appId, channel, fileMetadata, signer) {
   const appBundle = {
     kind,
     tags: [
-      ['d', appId],
+      ['d', dTag],
       ...fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType])
     ],
     content: '',

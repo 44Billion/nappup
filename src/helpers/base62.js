@@ -1,56 +1,59 @@
-import { bytesToHex, hexToBytes } from '#helpers/byte.js'
+export const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+const BASE = BigInt(ALPHABET.length)
+const LEADER = ALPHABET[0]
+const CHAR_MAP = new Map([...ALPHABET].map((char, index) => [char, BigInt(index)]))
 
-export function bytesToBase62 (bytes, padLength) {
-  const hex = bytesToHex(bytes)
-  return hexToBase62(hex, padLength)
-}
+export function bytesToBase62 (bytes, padLength = 0) {
+  if (bytes.length === 0) return ''.padStart(padLength, LEADER)
 
-export function hexToBase62 (hex, padLength) {
-  return bigIntToBase62(BigInt('0x' + hex), padLength)
-}
-
-function bigIntToBase62 (num, padLength = 0) {
-  const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-  const base = BigInt(alphabet.length)
-  if (num === 0n) return alphabet[0].padStart(padLength, alphabet[0])
+  let num = 0n
+  for (const byte of bytes) {
+    num = (num << 8n) + BigInt(byte)
+  }
 
   let result = ''
-  let currentNum = num
+  if (num === 0n) return LEADER.padStart(padLength, LEADER)
 
-  while (currentNum > 0n) {
-    const remainder = currentNum % base
-    result = alphabet[Number(remainder)] + result
-    currentNum = currentNum / base
+  while (num > 0n) {
+    const remainder = num % BASE
+    result = ALPHABET[Number(remainder)] + result
+    num = num / BASE
   }
-  return result.padStart(padLength, alphabet[0])
+
+  for (const byte of bytes) {
+    if (byte !== 0) break
+
+    result = LEADER + result
+  }
+
+  return result.padStart(padLength, LEADER)
 }
 
 export function base62ToBytes (base62Str) {
-  const hexString = base62ToHex(base62Str)
-  return hexToBytes(hexString)
-}
+  if (typeof base62Str !== 'string') { throw new Error('base62ToBytes requires a string argument') }
+  if (base62Str.length === 0) return new Uint8Array()
 
-export function base62ToHex (base62Str, padLength = 64 /* nostr hex key */) {
-  const bigIntValue = base62ToBigInt(base62Str)
-  return bigIntValue.toString(16).padStart(padLength, '0')
-}
+  let leadingZeros = 0
+  for (let i = 0; i < base62Str.length; i++) {
+    if (base62Str[i] !== LEADER) break
 
-function base62ToBigInt (base62Str) {
-  const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-  const base = BigInt(alphabet.length)
-  // Create a lookup map for faster character value retrieval
-  const charMap = new Map(
-    [...alphabet].map((char, index) => [char, BigInt(index)])
-  )
-
-  let result = 0n
-  for (const char of base62Str) {
-    const value = charMap.get(char)
-    if (value === undefined) {
-      throw new Error(`Invalid character in Base62 string: ${char}`)
-    }
-    result = result * base + value
+    leadingZeros++
   }
 
+  let num = 0n
+  for (const char of base62Str) {
+    const value = CHAR_MAP.get(char)
+    if (value === undefined) { throw new Error(`Invalid character in Base62 string: ${char}`) }
+    num = num * BASE + value
+  }
+
+  const bytes = []
+  while (num > 0n) {
+    bytes.unshift(Number(num & 0xffn))
+    num = num >> 8n
+  }
+
+  const result = new Uint8Array(leadingZeros + bytes.length)
+  result.set(bytes, leadingZeros)
   return result
 }

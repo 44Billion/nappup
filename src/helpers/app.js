@@ -1,17 +1,17 @@
 import { bytesToBase62 } from '#helpers/base62.js'
 
-export const NOSTR_APP_ID_MAX_LENGTH = 19
+export const NOSTR_APP_D_TAG_MAX_LENGTH = 19
 
-export function isNostrAppIdSafe (string) {
-  return isSubdomainSafe(string) && string.length <= NOSTR_APP_ID_MAX_LENGTH
+export function isNostrAppDTagSafe (string) {
+  return isSubdomainSafe(string) && string.length <= NOSTR_APP_D_TAG_MAX_LENGTH
 }
 
 function isSubdomainSafe (string) {
   return /(?:^[A-Za-z0-9]$)|(?:^(?!.*--)[A-Za-z0-9][A-Za-z0-9-]{0,63}[A-Za-z0-9]$)/.test(string)
 }
 
-export function deriveNostrAppId (string) {
-  return toSubdomainSafe(string, NOSTR_APP_ID_MAX_LENGTH)
+export function deriveNostrAppDTag (string) {
+  return toSubdomainSafe(string, NOSTR_APP_D_TAG_MAX_LENGTH)
 }
 
 async function toSubdomainSafe (string, maxStringLength) {

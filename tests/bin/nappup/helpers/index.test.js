@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { parseArgs, getFiles } from '#bin/nappup/helpers.js'
 
 describe('bin/index.js', () => {
-  const testDir = path.resolve('test/fixtures/bin/nappup')
+  const testDir = path.resolve('tests/fixtures/bin/nappup')
 
   describe('parseArgs()', () => {
     it('should parse the directory argument', () => {
@@ -23,29 +23,29 @@ describe('bin/index.js', () => {
     })
 
     it('should parse the app ID argument', () => {
-      const { appId } = parseArgs(['-i', 'my-app-id'])
-      assert.strictEqual(appId, 'my-app-id')
+      const { dTag } = parseArgs(['-d', 'my-app-d-tag'])
+      assert.strictEqual(dTag, 'my-app-d-tag')
     })
 
     it('should parse all arguments together', () => {
-      const { dir, sk, appId } = parseArgs(['/some/path', '-s', 'my-secret-key', '-i', 'my-app-id'])
+      const { dir, sk, dTag } = parseArgs(['/some/path', '-s', 'my-secret-key', '-d', 'my-app-d-tag'])
       assert.strictEqual(dir, path.resolve('/some/path'))
       assert.strictEqual(sk, 'my-secret-key')
-      assert.strictEqual(appId, 'my-app-id')
+      assert.strictEqual(dTag, 'my-app-d-tag')
     })
 
     it('directory argument is optional', () => {
-      const { dir, sk, appId } = parseArgs(['-s', 'my-secret-key', '-i', 'my-app-id'])
+      const { dir, sk, dTag } = parseArgs(['-s', 'my-secret-key', '-d', 'my-app-d-tag'])
       assert.strictEqual(dir, process.cwd())
       assert.strictEqual(sk, 'my-secret-key')
-      assert.strictEqual(appId, 'my-app-id')
+      assert.strictEqual(dTag, 'my-app-d-tag')
     })
 
     it('all arguments are optional', () => {
-      const { dir, sk, appId } = parseArgs([])
+      const { dir, sk, dTag } = parseArgs([])
       assert.strictEqual(dir, process.cwd())
       assert.strictEqual(sk, null)
-      assert.strictEqual(appId, null)
+      assert.strictEqual(dTag, null)
     })
   })
 
@@ -59,6 +59,7 @@ describe('bin/index.js', () => {
       const expectedFiles = [
         path.join(testDir, 'file1.txt'),
         path.join(testDir, 'file2.js'),
+        path.join(testDir, 'subdir', 'file4.unknown'),
         path.join(testDir, 'subdir', 'file3.css')
       ].sort()
 

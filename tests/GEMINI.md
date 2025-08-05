@@ -1,4 +1,4 @@
-# test Folder
+# tests Folder
 
 - Place tests here
 
