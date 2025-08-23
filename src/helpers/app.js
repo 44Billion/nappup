@@ -1,13 +1,16 @@
-import { bytesToBase62 } from '#helpers/base62.js'
+import { bytesToBase36 } from '#helpers/base36.js'
 
-export const NOSTR_APP_D_TAG_MAX_LENGTH = 19
+// 63 - (1<channel> + 5<b36loggeduserpkslug> 50<b36pk>)
+// <b36loggeduserpkslug> pk chars at positions [7][17][27][37][47]
+// to avoid vanity or pow colisions
+export const NOSTR_APP_D_TAG_MAX_LENGTH = 7
 
 export function isNostrAppDTagSafe (string) {
   return isSubdomainSafe(string) && string.length <= NOSTR_APP_D_TAG_MAX_LENGTH
 }
 
 function isSubdomainSafe (string) {
-  return /(?:^[A-Za-z0-9]$)|(?:^(?!.*--)[A-Za-z0-9][A-Za-z0-9-]{0,63}[A-Za-z0-9]$)/.test(string)
+  return /(?:^[a-z0-9]$)|(?:^(?!.*--)[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$)/.test(string)
 }
 
 export function deriveNostrAppDTag (string) {
@@ -15,9 +18,9 @@ export function deriveNostrAppDTag (string) {
 }
 
 async function toSubdomainSafe (string, maxStringLength) {
-  const byteLength = base62MaxLengthToMaxSourceByteLength(maxStringLength)
+  const byteLength = baseMaxLengthToMaxSourceByteLength(maxStringLength, 36)
   const bytes = (await toSha1(string)).slice(0, byteLength)
-  return bytesToBase62(bytes, maxStringLength)
+  return bytesToBase36(bytes, maxStringLength)
 }
 
 async function toSha1 (string) {
@@ -25,12 +28,14 @@ async function toSha1 (string) {
   return new Uint8Array(await crypto.subtle.digest('SHA-1', bytes))
 }
 
-// base62MaxLengthToMaxSourceByteLength(19) === 14 byte length
-function base62MaxLengthToMaxSourceByteLength (maxStringLength) {
-  const log62 = Math.log(62)
+// baseMaxLengthToMaxSourceByteLength(19, 62) === 14 byte length
+// baseMaxLengthToMaxSourceByteLength(7, 36) === 4 byte length
+function baseMaxLengthToMaxSourceByteLength (maxStringLength, base) {
+  if (!base) throw new Error('Which base?')
+  const baseLog = Math.log(base)
   const log256 = Math.log(256)
 
-  const maxByteLength = (maxStringLength * log62) / log256
+  const maxByteLength = (maxStringLength * baseLog) / log256
 
   return Math.floor(maxByteLength)
 }

@@ -5,7 +5,7 @@ import { appEncode, appDecode } from '#helpers/nip19.js'
 describe('appEncode/appDecode', () => {
   it('should encode and decode an app reference', () => {
     const ref = {
-      dTag: 'a-deduplication-tag',
+      dTag: 'dedupe',
       pubkey: 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5',
       channel: 'main',
       relays: ['wss://relay.damus.io']
@@ -22,7 +22,7 @@ describe('appEncode/appDecode', () => {
 
   it('should encode and decode an app reference with a different channel', () => {
     const ref = {
-      dTag: 'other-dedupe-tag',
+      dTag: 'de-dupe',
       pubkey: 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5',
       channel: 'next',
       relays: ['aaddds']
@@ -39,7 +39,7 @@ describe('appEncode/appDecode', () => {
 
   it('should encode and decode an app reference with kind set instead of channel', () => {
     const ref = {
-      dTag: 'another-dedupe-tag',
+      dTag: 'dedupe3',
       pubkey: 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5',
       kind: 37450,
       relays: ['wss://relay.damus.io', 'wss://relay.44billion.net']

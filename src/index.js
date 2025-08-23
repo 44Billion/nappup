@@ -93,7 +93,7 @@ async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signe
   const storedEvents = await nostrRelays.getEvents({
     kinds: [34600],
     authors: [await signer.getPublicKey()],
-    dTag: [dTagValue],
+    '#d': [dTagValue],
     limit: 1
   }, writeRelays)
   if (storedEvents.length === 0) return []

@@ -1,4 +1,4 @@
-import { bytesToHex, hexToBytes } from '#helpers/byte.js'
+import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
 import { bytesToBase62, base62ToBytes, ALPHABET as base62Alphabet } from '#helpers/base62.js'
 import { isNostrAppDTagSafe } from '#helpers/app.js'
 
@@ -21,7 +21,7 @@ export function appEncode (ref) {
   const tlv = toTlv([
     [textEncoder.encode(ref.dTag)], // type 0 (the array index)
     (ref.relays || []).map(url => textEncoder.encode(url)), // type 1
-    [hexToBytes(ref.pubkey)], // type 2
+    [base16ToBytes(ref.pubkey)], // type 2
     [uintToBytes(channelIndex)] // type 3
   ])
   const base62 = bytesToBase62(tlv)
@@ -40,7 +40,7 @@ export function appDecode (entity) {
   const channel = channelEnum[parseInt(tlv[3][0])]
   return {
     dTag: textDecoder.decode(tlv[0][0]),
-    pubkey: bytesToHex(tlv[2][0]),
+    pubkey: bytesToBase16(tlv[2][0]),
     kind: kindByChannel[channel],
     channel,
     relays: tlv[1] ? tlv[1].map(url => textDecoder.decode(url)) : []

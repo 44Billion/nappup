@@ -5,7 +5,7 @@ import * as dotenv from 'dotenv'
 import { getPublicKey, finalizeEvent } from 'nostr-tools/pure'
 import { getConversationKey, encrypt, decrypt } from 'nostr-tools/nip44'
 import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
-import { bytesToHex, hexToBytes } from '#helpers/byte.js'
+import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env`
@@ -34,17 +34,17 @@ export default class NostrSigner {
   }
 
   static async create (skHex) {
-    if (skHex) return new this(createToken, hexToBytes(skHex))
+    if (skHex) return new this(createToken, base16ToBytes(skHex))
 
     let skBytes
     let isNewSk = false
     if (process.env.NOSTR_SECRET_KEY) {
-      skBytes = hexToBytes(process.env.NOSTR_SECRET_KEY)
+      skBytes = base16ToBytes(process.env.NOSTR_SECRET_KEY)
     } else {
       isNewSk = true
       skHex = generateSecretKey()
       fs.appendFileSync(path.resolve(dotenvPath), `NOSTR_SECRET_KEY=${skHex}\n`)
-      skBytes = hexToBytes(skHex)
+      skBytes = base16ToBytes(skHex)
     }
     const ret = new this(createToken, skBytes)
     if (isNewSk) await ret.#initSk(skHex)
@@ -137,7 +137,7 @@ function generateSecretKey () {
   const randomBytes = crypto.getRandomValues(new Uint8Array(40))
   const B256 = 2n ** 256n // secp256k1 is short weierstrass curve
   const N = B256 - 0x14551231950b75fc4402da1732fc9bebfn // curve (group) order
-  const bytesToNumber = b => BigInt('0x' + (bytesToHex(b) || '0'))
+  const bytesToNumber = b => BigInt('0x' + (bytesToBase16(b) || '0'))
   const mod = (a, b) => { const r = a % b; return r >= 0n ? r : b + r } // mod division
   const num = mod(bytesToNumber(randomBytes), N - 1n) + 1n // takes at least n+8 bytes
   return num.toString(16).padStart(64, '0')
