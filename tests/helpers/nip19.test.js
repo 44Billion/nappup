@@ -16,6 +16,7 @@ describe('appEncode/appDecode', () => {
     const { kind } = decoded
     delete decoded.kind
 
+    assert.ok(encoded.startsWith('+'))
     assert.equal(kind, 37448)
     assert.deepEqual(decoded, ref)
   })
@@ -33,6 +34,7 @@ describe('appEncode/appDecode', () => {
     const { kind } = decoded
     delete decoded.kind
 
+    assert.ok(encoded.startsWith('++'))
     assert.equal(kind, 37449)
     assert.deepEqual(decoded, ref)
   })
@@ -50,6 +52,7 @@ describe('appEncode/appDecode', () => {
     const { channel } = decoded
     delete decoded.channel
 
+    assert.ok(encoded.startsWith('+++'))
     assert.equal(channel, 'draft')
     assert.deepEqual(decoded, ref)
   })

@@ -44,7 +44,7 @@ export class NostrRelays {
   async disconnect (url) {
     if (this.#relays.has(url)) {
       const relay = this.#relays.get(url)
-      if (relay.ws.readyState < 2) await relay.close().catch(console.log)
+      if (relay.ws.readyState < 2) await relay.close()?.catch(console.log)
       this.#relays.delete(url)
       clearTimeout(this.#relayTimeouts.get(url))
       this.#relayTimeouts.delete(url)

@@ -1,7 +1,7 @@
-export const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-const BASE = BigInt(ALPHABET.length)
-const LEADER = ALPHABET[0]
-const CHAR_MAP = new Map([...ALPHABET].map((char, index) => [char, BigInt(index)]))
+export const BASE62_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+const BASE = BigInt(BASE62_ALPHABET.length)
+const LEADER = BASE62_ALPHABET[0]
+const CHAR_MAP = new Map([...BASE62_ALPHABET].map((char, index) => [char, BigInt(index)]))
 
 export function bytesToBase62 (bytes, padLength = 0) {
   if (bytes.length === 0) return ''.padStart(padLength, LEADER)
@@ -16,7 +16,7 @@ export function bytesToBase62 (bytes, padLength = 0) {
 
   while (num > 0n) {
     const remainder = num % BASE
-    result = ALPHABET[Number(remainder)] + result
+    result = BASE62_ALPHABET[Number(remainder)] + result
     num = num / BASE
   }
 

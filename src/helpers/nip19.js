@@ -1,43 +1,52 @@
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
-import { bytesToBase62, base62ToBytes, ALPHABET as base62Alphabet } from '#helpers/base62.js'
+import { bytesToBase62, base62ToBytes, BASE62_ALPHABET } from '#helpers/base62.js'
 import { isNostrAppDTagSafe } from '#helpers/app.js'
 
 const MAX_SIZE = 5000
-export const BASE62_ENTITY_REGEX = new RegExp(`^app-[${base62Alphabet}]{,${MAX_SIZE}}$`)
-export const kindByChannel = {
+export const NAPP_ENTITY_REGEX = new RegExp(`^\\+{1,3}[${BASE62_ALPHABET}]{48,${MAX_SIZE}}$`)
+const textEncoder = new TextEncoder()
+const textDecoder = new TextDecoder()
+
+const kindByChannel = {
   main: 37448,
   next: 37449,
   draft: 37450
 }
-const channelEnum = Object.keys(kindByChannel)
-const textEncoder = new TextEncoder()
-const textDecoder = new TextDecoder()
-
+const channelByKind = Object.fromEntries(
+  Object.entries(kindByChannel).map(([k, v]) => [v, k])
+)
+const prefixByChannel = {
+  main: '+',
+  next: '++',
+  draft: '+++'
+}
+const channelByPrefix = Object.fromEntries(
+  Object.entries(prefixByChannel).map(([k, v]) => [v, k])
+)
 export function appEncode (ref) {
   if (!isNostrAppDTagSafe(ref.dTag)) { throw new Error('Invalid deduplication tag') }
-  const channelIndex = Object.entries(kindByChannel)
-    .findIndex(([k, v]) => ref.channel ? k === ref.channel : v === ref.kind)
-  if (channelIndex === -1) throw new Error('Wrong channel')
+  const channel = ref.channel ? (prefixByChannel[ref.channel] && ref.channel) : channelByKind[ref.kind]
+  if (!channel) throw new Error('Wrong channel')
   const tlv = toTlv([
     [textEncoder.encode(ref.dTag)], // type 0 (the array index)
     (ref.relays || []).map(url => textEncoder.encode(url)), // type 1
-    [base16ToBytes(ref.pubkey)], // type 2
-    [uintToBytes(channelIndex)] // type 3
+    [base16ToBytes(ref.pubkey)] // type 2
   ])
   const base62 = bytesToBase62(tlv)
-  return `app-${base62}`
+  const prefix = prefixByChannel[channel]
+  return `${prefix}${base62}`
 }
 
 export function appDecode (entity) {
-  const [, base62] = entity.split('-')
+  const prefix = entity.match(/^\+*/)[0]
+  const channel = channelByPrefix[prefix]
+  if (!channel) throw new Error('Invalid channel')
+  const base62 = entity.slice(prefix.length)
   const tlv = tlvToObj(base62ToBytes(base62))
   if (!tlv[0]?.[0]) throw new Error('Missing deduplication tag')
   if (!tlv[2]?.[0]) throw new Error('Missing author pubkey')
   if (tlv[2][0].length !== 32) throw new Error('Author pubkey should be 32 bytes')
-  if (!tlv[3]?.[0]) throw new Error('Missing channel enum')
-  if (tlv[3][0].length !== 1) throw new Error('Channel enum should be 1 byte')
 
-  const channel = channelEnum[parseInt(tlv[3][0])]
   return {
     dTag: textDecoder.decode(tlv[0][0]),
     pubkey: bytesToBase16(tlv[2][0]),
@@ -45,12 +54,6 @@ export function appDecode (entity) {
     channel,
     relays: tlv[1] ? tlv[1].map(url => textDecoder.decode(url)) : []
   }
-}
-
-// Return shortest uint8Array size (not fixed size)
-function uintToBytes (n, bytes = []) {
-  do { bytes.unshift(n & 255) } while ((n >>= 8) > 0)
-  return new Uint8Array(bytes)
 }
 
 function toTlv (tlvConfig) {
