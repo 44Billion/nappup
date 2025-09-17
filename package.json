@@ -17,10 +17,12 @@
     "nappup": "bin/nappup/index.js"
   },
   "dependencies": {
+    "@noble/curves": "^2.0.0",
+    "@noble/hashes": "^2.0.0",
     "dotenv": "^17.2.0",
     "file-type": "^21.0.0",
     "mime-types": "^3.0.1",
-    "nmmr": "^1.0.4",
+    "nmmr": "^1.0.5",
     "nostr-tools": "^2.15.0"
   },
   "devDependencies": {

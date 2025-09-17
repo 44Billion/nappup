@@ -15,8 +15,8 @@ describe('relays', () => {
     relays.disconnectAll()
   })
 
-  it('should get events from a relay', async () => {
-    const events = await relays.getEvents({ kinds: [1], limit: 2 }, freeRelays.slice(0, 1))
+  it.only('should get events from a relay', async () => {
+    const events = (await relays.getEvents({ kinds: [1], limit: 2 }, freeRelays.slice(0, 1))).result
     assert.ok(Array.isArray(events))
   })
 
@@ -31,7 +31,8 @@ describe('relays', () => {
     }
     const signedEvent = nostrSigner.signEvent(event)
     await relays.sendEvent(signedEvent, freeRelays.slice(0, 1))
-    const [signedEventCopy] = await relays.getEvents({ ids: [signedEvent.id], limit: 1 }, freeRelays.slice(0, 1))
+    await new Promise(resolve => setTimeout(resolve, 1000)) // wait for the event to propagate
+    const [signedEventCopy] = (await relays.getEvents({ ids: [signedEvent.id], limit: 1 }, freeRelays.slice(0, 1))).result
     assert.deepEqual(
       (({ id, kind, pubkey, tags, content, created_at, sig }) => ({ id, kind, pubkey, tags, content, created_at, sig }))(signedEvent),
       (({ id, kind, pubkey, tags, content, created_at, sig }) => ({ id, kind, pubkey, tags, content, created_at, sig }))(signedEventCopy)

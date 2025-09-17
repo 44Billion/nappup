@@ -10,6 +10,7 @@ export function parseArgs (args) {
   let sk = null
   let dTag = null
   let channel = null
+  let shouldReupload = false
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-s' && args[i + 1]) {
@@ -24,6 +25,8 @@ export function parseArgs (args) {
       channel = 'next'
     } else if (args[i] === '--draft' && channel === null) {
       channel = 'draft'
+    } else if (args[i] === '-r') {
+      shouldReupload = true
     } else if (!args[i].startsWith('-') && dir === null) {
       dir = args[i]
     }
@@ -33,7 +36,8 @@ export function parseArgs (args) {
     dir: path.resolve(dir ?? '.'),
     sk,
     dTag,
-    channel: channel || 'main'
+    channel: channel || 'main',
+    shouldReupload
   }
 }
 

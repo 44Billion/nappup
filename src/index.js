@@ -14,12 +14,15 @@ export default async function (...args) {
   }
 }
 
-export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, channel = 'main' } = {}) {
+export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, channel = 'main', shouldReupload = false } = {}) {
   if (!nostrSigner && typeof window !== 'undefined') nostrSigner = window.nostr
   if (!nostrSigner) throw new Error('No Nostr signer found')
   if (typeof window !== 'undefined' && nostrSigner === window.nostr) {
     nostrSigner.getRelays = NostrSigner.prototype.getRelays
   }
+  const writeRelays = (await nostrSigner.getRelays()).write
+  console.log(`Found ${writeRelays.length} outbox relays for pubkey ${nostrSigner.getPublicKey()}:\n ${writeRelays.join(', ')}`)
+  if (writeRelays.length === 0) throw new Error('No outbox relays found')
 
   if (typeof dTag === 'string') {
     if (!isNostrAppDTagSafe(dTag)) throw new Error('dTag should be [A-Za-z0-9] with length ranging from 1 to 19')
@@ -31,6 +34,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
   const fileMetadata = []
 
   log(`Processing ${fileList.length} files`)
+  let pause = 2000
   for (const file of fileList) {
     nmmr = new NMMR()
     const stream = file.stream()
@@ -44,7 +48,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
       // remove root dir
       const filename = file.webkitRelativePath.split('/').slice(1).join('/')
       log(`Uploading ${chunkLength} file parts of ${filename}`)
-      await uploadBinaryDataChunks(nmmr, nostrSigner, { mimeType: file.type || 'application/octet-stream' })
+      ;({ pause } = (await uploadBinaryDataChunks({ nmmr, signer: nostrSigner, filename, chunkLength, log, pause, mimeType: file.type || 'application/octet-stream', shouldReupload })))
       fileMetadata.push({
         rootHash: nmmr.getRoot(),
         filename,
@@ -54,7 +58,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
   }
 
   log(`Uploading bundle #${dTag}`)
-  const bundle = await uploadBundle(dTag, channel, fileMetadata, nostrSigner)
+  const bundle = await uploadBundle({ dTag, channel, fileMetadata, signer: nostrSigner, pause })
 
   const appEntity = appEncode({
     dTag: bundle.tags.find(v => v[0] === 'd')[1],
@@ -65,17 +69,22 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
   log(`Visit at https://44billion.net/${appEntity}`)
 }
 
-async function uploadBinaryDataChunks (nmmr, signer, { mimeType } = {}) {
+async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, log, pause = 0, mimeType, shouldReupload = false }) {
   const writeRelays = (await signer.getRelays()).write
+  let chunkIndex = 0
   for await (const chunk of nmmr.getChunks()) {
     const dTag = chunk.x
     const currentCtag = `${chunk.rootX}:${chunk.index}`
-    const prevCTags = await getPreviousCtags(dTag, currentCtag, writeRelays, signer)
+    const { otherCtags, hasCurrentCtag } = await getPreviousCtags(dTag, currentCtag, writeRelays, signer)
+    if (!shouldReupload && hasCurrentCtag) {
+      log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
+      continue
+    }
     const binaryDataChunk = {
       kind: 34600,
       tags: [
         ['d', dTag],
-        ...prevCTags,
+        ...otherCtags,
         ['c', currentCtag, chunk.length, ...chunk.proof],
         ...(mimeType ? [['m', mimeType]] : [])
       ],
@@ -85,23 +94,80 @@ async function uploadBinaryDataChunks (nmmr, signer, { mimeType } = {}) {
     }
 
     const event = await signer.signEvent(binaryDataChunk)
-    await nostrRelays.sendEvent(event, writeRelays)
+    log(`${filename}: Uploading file part ${++chunkIndex} of ${chunkLength} to ${writeRelays.length} relays`)
+    ;({ pause } = (await throttledSendEvent(event, writeRelays, { pause, log, trailingPause: true })))
   }
+  return { pause }
+}
+
+async function throttledSendEvent (event, relays, {
+  pause, log,
+  retries = 0, maxRetries = 10,
+  minSuccessfulRelays = 1,
+  leadingPause = false, trailingPause = false
+}) {
+  if (pause && leadingPause) await new Promise(resolve => setTimeout(resolve, pause))
+  if (retries > 0) console.log(`Retrying upload to ${relays.length} relays: ${relays.join(', ')}`)
+
+  const { errors } = (await nostrRelays.sendEvent(event, relays, 15000))
+  if (errors.length === 0) {
+    if (pause && trailingPause) await new Promise(resolve => setTimeout(resolve, pause))
+    return { pause }
+  }
+
+  const [rateLimitErrors, unretryableErrors] =
+    errors.reduce((r, v) => {
+      if ((v.reason?.message ?? '').startsWith('rate-limited:')) r[0].push(v)
+      else r[1].push(v)
+      return r
+    }, [[], []])
+  console.log(`${unretryableErrors.length} Unretryable errors\n: ${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
+  const unretryableErrorsLength = errors.length - rateLimitErrors.length
+  const maybeSuccessfulRelays = relays.length - unretryableErrorsLength
+  const hasReachedMaxRetries = retries > maxRetries
+  if (
+    hasReachedMaxRetries ||
+    maybeSuccessfulRelays < minSuccessfulRelays
+  ) throw new Error(errors.map(v => `\n${v.relay}: ${v.reason}`).join('\n'))
+
+  if (rateLimitErrors.length === 0) {
+    if (pause && trailingPause) await new Promise(resolve => setTimeout(resolve, pause))
+    return { pause }
+  }
+
+  const erroedRelays = rateLimitErrors.map(v => v.relay)
+  log(`Rate limited by ${erroedRelays.length} relays, pausing for ${pause + 2000} ms`)
+  await new Promise(resolve => setTimeout(resolve, (pause += 2000)))
+
+  minSuccessfulRelays = Math.max(0, minSuccessfulRelays - (relays.length - erroedRelays.length))
+  return await throttledSendEvent(event, erroedRelays, {
+    pause, log, retries: ++retries, maxRetries, minSuccessfulRelays, leadingPause: false, trailingPause
+  })
 }
 
 async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signer) {
-  const storedEvents = await nostrRelays.getEvents({
+  const storedEvents = (await nostrRelays.getEvents({
     kinds: [34600],
     authors: [await signer.getPublicKey()],
     '#d': [dTagValue],
     limit: 1
-  }, writeRelays)
-  if (storedEvents.length === 0) return []
+  }, writeRelays)).result
+
+  let hasCurrentCtag = false
+  const hasEvent = storedEvents.length > 0
+  if (!hasEvent) return { otherCtags: [], hasEvent, hasCurrentCtag }
 
   const cTagValues = { [currentCtagValue]: true }
   const prevTags = storedEvents.sort((a, b) => b.created_at - a.created_at)[0].tags
-  if (!Array.isArray(prevTags)) return []
-  return prevTags
+  if (!Array.isArray(prevTags)) return { otherCtags: [], hasEvent, hasCurrentCtag }
+
+  hasCurrentCtag = prevTags.some(tag =>
+    Array.isArray(tag) &&
+    tag[0] === 'c' &&
+    tag[1] === currentCtagValue
+  )
+
+  const otherCtags = prevTags
     .filter(v => {
       const isCTag =
         Array.isArray(v) &&
@@ -114,9 +180,11 @@ async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signe
       cTagValues[v[1]] = true
       return isCTag && isntDuplicate
     })
+
+  return { otherCtags, hasEvent, hasCurrentCtag }
 }
 
-async function uploadBundle (dTag, channel, fileMetadata, signer) {
+async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0 }) {
   const kind = {
     main: 37448, // stable
     next: 37449, // insider
@@ -132,6 +200,6 @@ async function uploadBundle (dTag, channel, fileMetadata, signer) {
     created_at: Math.floor(Date.now() / 1000)
   }
   const event = await signer.signEvent(appBundle)
-  await nostrRelays.sendEvent(event, (await signer.getRelays()).write)
+  await throttledSendEvent(event, (await signer.getRelays()).write, { pause, trailingPause: true })
   return event
 }

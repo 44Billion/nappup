@@ -55,7 +55,7 @@ export default class NostrSigner {
   async getRelays () {
     if (this.relays) return this.relays
 
-    const relayLists = await nostrRelays.getEvents({ authors: [await this.getPublicKey()], kinds: [10002], limit: 1 }, seedRelays)
+    const relayLists = (await nostrRelays.getEvents({ authors: [await this.getPublicKey()], kinds: [10002], limit: 1 }, seedRelays)).result
     const relayList = relayLists.sort((a, b) => b.created_at - a.created_at)[0]
     const rTags = (relayList?.tags ?? []).filter(v => v[0] === 'r' && /^wss?:\/\//.test(v[1]))
     if (rTags.length === 0) return (this.relays = await this.#initRelays())
@@ -73,7 +73,9 @@ export default class NostrSigner {
   }
 
   async #initRelays () {
-    const relays = freeRelays.slice(0, 2)
+    // Use many relays, cause some have differences when serializing the DEL character
+    // in the content of an event, which may cause relay to reject the event.
+    const relays = freeRelays // .slice(0, 2)
     this.relays = {
       read: relays,
       write: relays
