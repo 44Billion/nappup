@@ -2,10 +2,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as dotenv from 'dotenv'
-import { getPublicKey, finalizeEvent } from 'nostr-tools/pure'
+import { getPublicKey } from 'nostr-tools/pure'
 import { getConversationKey, encrypt, decrypt } from 'nostr-tools/nip44'
 import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
+import { finalizeEvent } from '#helpers/nip01.js'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env`
