@@ -3,23 +3,15 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
 import { getPublicKey } from 'nostr-tools/pure'
 
-// String.fromCharCode(127), the DEL control character,
-// is the only char that needs special handling
-// because strfry's JSON lib does escape it
-// while JSON.stringify doesn't.
-function escapeDel (string) {
-  return string.replace(/\x7f/g, '\\u007f')
-}
-
 function serializeEvent (event) {
-  return escapeDel(JSON.stringify([
+  return JSON.stringify([
     0,
     event.pubkey,
     event.created_at,
     event.kind,
     event.tags,
     event.content
-  ]))
+  ])
 }
 
 function getEventHash (event) {

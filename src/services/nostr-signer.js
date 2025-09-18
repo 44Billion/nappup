@@ -73,9 +73,7 @@ export default class NostrSigner {
   }
 
   async #initRelays () {
-    // Use many relays, cause some have differences when serializing the DEL character
-    // in the content of an event, which may cause relay to reject the event.
-    const relays = freeRelays // .slice(0, 2)
+    const relays = freeRelays.slice(0, 2)
     this.relays = {
       read: relays,
       write: relays

@@ -1,6 +1,6 @@
 import NMMR from 'nmmr'
 import { appEncode } from '#helpers/nip19.js'
-import Base122Encoder from '#services/base122-encoder.js'
+import Base93Encoder from '#services/base93-encoder.js'
 import nostrRelays from '#services/nostr-relays.js'
 import NostrSigner from '#services/nostr-signer.js'
 import { streamToChunks } from '#helpers/stream.js'
@@ -21,7 +21,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
     nostrSigner.getRelays = NostrSigner.prototype.getRelays
   }
   const writeRelays = (await nostrSigner.getRelays()).write
-  console.log(`Found ${writeRelays.length} outbox relays for pubkey ${nostrSigner.getPublicKey()}:\n ${writeRelays.join(', ')}`)
+  log(`Found ${writeRelays.length} outbox relays for pubkey ${nostrSigner.getPublicKey()}:\n${writeRelays.join(', ')}`)
   if (writeRelays.length === 0) throw new Error('No outbox relays found')
 
   if (typeof dTag === 'string') {
@@ -34,13 +34,13 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
   const fileMetadata = []
 
   log(`Processing ${fileList.length} files`)
-  let pause = 2000
+  let pause = 1000
   for (const file of fileList) {
     nmmr = new NMMR()
     const stream = file.stream()
 
     let chunkLength = 0
-    for await (const chunk of streamToChunks(stream, 54600)) {
+    for await (const chunk of streamToChunks(stream, 51000)) {
       chunkLength++
       nmmr.append(chunk)
     }
@@ -88,8 +88,8 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
         ['c', currentCtag, chunk.length, ...chunk.proof],
         ...(mimeType ? [['m', mimeType]] : [])
       ],
-      // These chunks already have the expected size of 54600 bytes
-      content: new Base122Encoder().update(chunk.contentBytes).getEncoded(),
+      // These chunks already have the expected size of 51000 bytes
+      content: new Base93Encoder().update(chunk.contentBytes).getEncoded(),
       created_at: Math.floor(Date.now() / 1000)
     }
 
@@ -107,7 +107,7 @@ async function throttledSendEvent (event, relays, {
   leadingPause = false, trailingPause = false
 }) {
   if (pause && leadingPause) await new Promise(resolve => setTimeout(resolve, pause))
-  if (retries > 0) console.log(`Retrying upload to ${relays.length} relays: ${relays.join(', ')}`)
+  if (retries > 0) log(`Retrying upload to ${relays.length} relays: ${relays.join(', ')}`)
 
   const { errors } = (await nostrRelays.sendEvent(event, relays, 15000))
   if (errors.length === 0) {
@@ -121,7 +121,7 @@ async function throttledSendEvent (event, relays, {
       else r[1].push(v)
       return r
     }, [[], []])
-  console.log(`${unretryableErrors.length} Unretryable errors\n: ${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
+  log(`${unretryableErrors.length} Unretryable errors\n: ${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
   const unretryableErrorsLength = errors.length - rateLimitErrors.length
   const maybeSuccessfulRelays = relays.length - unretryableErrorsLength
   const hasReachedMaxRetries = retries > maxRetries
