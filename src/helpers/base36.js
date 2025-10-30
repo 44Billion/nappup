@@ -5,6 +5,12 @@ export const BASE36_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 const BASE = BigInt(BASE36_ALPHABET.length)
 const LEADER = BASE36_ALPHABET[0]
 const CHAR_MAP = new Map([...BASE36_ALPHABET].map((char, index) => [char, BigInt(index)]))
+const BASE36_REGEX = /^[0-9a-z]+$/
+
+export function isBase36 (str) {
+  if (typeof str !== 'string') return false
+  return BASE36_REGEX.test(str)
+}
 
 export function bytesToBase36 (bytes, padLength = 0) {
   return base16ToBase36(bytesToBase16(bytes), padLength)

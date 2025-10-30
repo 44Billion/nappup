@@ -1,4 +1,4 @@
-import { bytesToBase36 } from '#helpers/base36.js'
+import { bytesToBase36, isBase36 } from '#helpers/base36.js'
 
 // 63 - (1<channel> + 5<b36loggeduserpkslug> 50<b36pk>)
 // <b36loggeduserpkslug> pk chars at positions [7][17][27][37][47]
@@ -6,10 +6,10 @@ import { bytesToBase36 } from '#helpers/base36.js'
 export const NOSTR_APP_D_TAG_MAX_LENGTH = 7
 
 export function isNostrAppDTagSafe (string) {
-  return isSubdomainSafe(string) && string.length <= NOSTR_APP_D_TAG_MAX_LENGTH
+  return string.length > 0 && string.length <= NOSTR_APP_D_TAG_MAX_LENGTH && isBase36(string)
 }
 
-function isSubdomainSafe (string) {
+export function isSubdomainSafe (string) {
   return /(?:^[a-z0-9]$)|(?:^(?!.*--)[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$)/.test(string)
 }
 

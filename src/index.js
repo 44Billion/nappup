@@ -28,7 +28,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
     if (!isNostrAppDTagSafe(dTag)) throw new Error('dTag should be [A-Za-z0-9] with length ranging from 1 to 19')
   } else {
     dTag = fileList[0].webkitRelativePath.split('/')[0].trim()
-    if (!isNostrAppDTagSafe(dTag)) dTag = deriveNostrAppDTag(dTag || Math.random().toString(36))
+    if (!isNostrAppDTagSafe(dTag)) dTag = await deriveNostrAppDTag(dTag || Math.random().toString(36))
   }
   let nmmr
   const fileMetadata = []
@@ -42,7 +42,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
     let chunkLength = 0
     for await (const chunk of streamToChunks(stream, 51000)) {
       chunkLength++
-      nmmr.append(chunk)
+      await nmmr.append(chunk)
     }
     if (chunkLength) {
       // remove root dir
