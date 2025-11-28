@@ -17,13 +17,13 @@ it('encodes and decodes', async () => {
     .map(v => new TextEncoder().encode(v))
     .map(v => new Base93Encoder().update(v).getEncoded())
 
-  let iterator = new Base93Decoder(encodedChunks, { mimeType: 'text/plain' }).getDecoded()
+  let iterator = new Base93Decoder(encodedChunks, { mimeType: 'text/plain', preferTextStreamDecoding: true }).getDecoded()
   let whole = []
   for await (const decodedChunk of iterator) whole.push(decodedChunk)
   assert.equal(whole.join(' '), 'I 💞 Nostr')
 
   function * regularIterator () { for (const chunk of encodedChunks) yield chunk }
-  iterator = new Base93Decoder(regularIterator, { mimeType: 'text/plain' }).getDecoded()
+  iterator = new Base93Decoder(regularIterator, { mimeType: 'text/plain', preferTextStreamDecoding: true }).getDecoded()
   whole = []
   for await (const decodedChunk of iterator) whole.push(decodedChunk)
   assert.equal(whole.join(' '), 'I 💞 Nostr')
@@ -34,7 +34,7 @@ it('encodes and decodes', async () => {
       yield chunk
     }
   }
-  iterator = new Base93Decoder(asyncIterator, { mimeType: 'text/plain' }).getDecoded()
+  iterator = new Base93Decoder(asyncIterator, { mimeType: 'text/plain', preferTextStreamDecoding: true }).getDecoded()
   whole = []
   for await (const decodedChunk of iterator) whole.push(decodedChunk)
   assert.equal(whole.join(' '), 'I 💞 Nostr')
@@ -60,7 +60,7 @@ it('encodes and decodes large CSS file in chunks', async () => {
   // Step 2: Add chunks to NMMR
   const nmmr = new NMMR()
   for (const chunk of rawChunks) {
-    nmmr.append(chunk)
+    await nmmr.append(chunk)
   }
 
   // Step 3: Get chunks from NMMR and encode them

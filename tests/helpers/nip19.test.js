@@ -23,7 +23,7 @@ describe('appEncode/appDecode', () => {
 
   it('should encode and decode an app reference with a different channel', () => {
     const ref = {
-      dTag: 'de-dupe',
+      dTag: 'dedupe2',
       pubkey: 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5',
       channel: 'next',
       relays: ['aaddds']

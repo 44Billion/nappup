@@ -15,7 +15,7 @@ describe('relays', () => {
     relays.disconnectAll()
   })
 
-  it.only('should get events from a relay', async () => {
+  it('should get events from a relay', async () => {
     const events = (await relays.getEvents({ kinds: [1], limit: 2 }, freeRelays.slice(0, 1))).result
     assert.ok(Array.isArray(events))
   })
