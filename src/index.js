@@ -3,8 +3,9 @@ import { appEncode } from '#helpers/nip19.js'
 import Base93Encoder from '#services/base93-encoder.js'
 import nostrRelays from '#services/nostr-relays.js'
 import NostrSigner from '#services/nostr-signer.js'
-import { streamToChunks } from '#helpers/stream.js'
+import { streamToChunks, streamToText } from '#helpers/stream.js'
 import { isNostrAppDTagSafe, deriveNostrAppDTag } from '#helpers/app.js'
+import { extractHtmlMetadata, findFavicon, findIndexFile } from '#helpers/app-metadata.js'
 
 export default async function (...args) {
   try {
@@ -33,6 +34,21 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
   let nmmr
   const fileMetadata = []
 
+  const indexFile = findIndexFile(fileList)
+  let stallName, stallSummary
+  if (indexFile) {
+    try {
+      const htmlContent = await streamToText(indexFile.stream())
+      const { name, description } = extractHtmlMetadata(htmlContent)
+      stallName = name
+      stallSummary = description
+    } catch (err) {
+      log('Error extracting HTML metadata:', err)
+    }
+  }
+  const faviconFile = findFavicon(fileList)
+  let iconMetadata
+
   log(`Processing ${fileList.length} files`)
   let pause = 1000
   for (const file of fileList) {
@@ -54,8 +70,28 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
         filename,
         mimeType: file.type || 'application/octet-stream'
       })
+
+      if (faviconFile && file === faviconFile) {
+        iconMetadata = {
+          rootHash: nmmr.getRoot(),
+          mimeType: file.type || 'application/octet-stream'
+        }
+      }
     }
   }
+
+  log(`Uploading stall event for #${dTag}`)
+  ;({ pause } = (await maybeUploadStall({
+    dTag,
+    channel,
+    name: stallName,
+    summary: stallSummary,
+    icon: iconMetadata,
+    signer: nostrSigner,
+    writeRelays,
+    log,
+    pause
+  })))
 
   log(`Uploading bundle #${dTag}`)
   const bundle = await uploadBundle({ dTag, channel, fileMetadata, signer: nostrSigner, pause })
@@ -202,4 +238,157 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0 })
   const event = await signer.signEvent(appBundle)
   await throttledSendEvent(event, (await signer.getRelays()).write, { pause, trailingPause: true })
   return event
+}
+
+async function maybeUploadStall ({
+  dTag,
+  channel,
+  name,
+  summary,
+  icon,
+  signer,
+  writeRelays,
+  log,
+  pause
+}) {
+  const trimmedName = typeof name === 'string' ? name.trim() : ''
+  const trimmedSummary = typeof summary === 'string' ? summary.trim() : ''
+  const iconRootHash = icon?.rootHash
+  const iconMimeType = icon?.mimeType
+  const hasMetadata = Boolean(trimmedName) || Boolean(trimmedSummary) || Boolean(iconRootHash)
+
+  const previous = await getPreviousStall(dTag, writeRelays, signer, channel)
+  if (!previous && !hasMetadata) return { pause }
+
+  const publishStall = async (event) => {
+    const signedEvent = await signer.signEvent(event)
+    return await throttledSendEvent(signedEvent, writeRelays, { pause, log, trailingPause: true })
+  }
+
+  const createdAt = Math.floor(Date.now() / 1000)
+  const kind = {
+    main: 37348,
+    next: 37349,
+    draft: 37350
+  }[channel] ?? 37348
+
+  if (!previous) {
+    const tags = [
+      ['d', dTag],
+      ['c', '*']
+    ]
+
+    let hasIcon = false
+    let hasName = false
+    if (iconRootHash && iconMimeType) {
+      hasIcon = true
+      tags.push(['icon', iconRootHash, iconMimeType])
+      tags.push(['auto', 'icon'])
+    }
+
+    if (trimmedName) {
+      hasName = true
+      tags.push(['name', trimmedName])
+      tags.push(['auto', 'name'])
+    }
+
+    if (trimmedSummary) {
+      tags.push(['summary', trimmedSummary])
+      tags.push(['auto', 'summary'])
+    }
+
+    if (!hasIcon || !hasName) return { pause }
+
+    return await publishStall({
+      kind,
+      tags,
+      content: '',
+      created_at: createdAt
+    })
+  }
+
+  const tags = Array.isArray(previous.tags)
+    ? previous.tags.map(tag => (Array.isArray(tag) ? [...tag] : tag))
+    : []
+  let changed = false
+
+  const ensureTagValue = (key, updater) => {
+    const index = tags.findIndex(tag => Array.isArray(tag) && tag[0] === key)
+    if (index === -1) {
+      const next = updater(null)
+      if (!next) return
+      tags.push(next)
+      changed = true
+      return
+    }
+
+    const next = updater(tags[index])
+    if (!next) return
+    if (!tags[index] || tags[index].some((value, idx) => value !== next[idx])) {
+      tags[index] = next
+      changed = true
+    }
+  }
+
+  ensureTagValue('d', (existing) => {
+    if (existing && existing[1] === dTag) return existing
+    return ['d', dTag]
+  })
+
+  ensureTagValue('c', (existing) => {
+    if (!existing) return ['c', '*']
+    const currentValue = typeof existing[1] === 'string' ? existing[1].trim() : ''
+    if (currentValue === '') return ['c', '*']
+    return existing
+  })
+
+  const hasAuto = (field) => tags.some(tag => Array.isArray(tag) && tag[0] === 'auto' && tag[1] === field)
+
+  if (trimmedName && hasAuto('name')) {
+    ensureTagValue('name', (existing) => {
+      if (existing && existing[1] === trimmedName) return existing
+      return ['name', trimmedName]
+    })
+  }
+
+  if (trimmedSummary && hasAuto('summary')) {
+    ensureTagValue('summary', (existing) => {
+      if (existing && existing[1] === trimmedSummary) return existing
+      return ['summary', trimmedSummary]
+    })
+  }
+
+  if (iconRootHash && iconMimeType && hasAuto('icon')) {
+    ensureTagValue('icon', (existing) => {
+      if (existing && existing[1] === iconRootHash && existing[2] === iconMimeType) return existing
+      return ['icon', iconRootHash, iconMimeType]
+    })
+  }
+
+  if (!changed) return { pause }
+
+  return await publishStall({
+    kind,
+    tags,
+    content: typeof previous.content === 'string' ? previous.content : '',
+    created_at: createdAt
+  })
+}
+
+async function getPreviousStall (dTagValue, writeRelays, signer, channel) {
+  const kind = {
+    main: 37348,
+    next: 37349,
+    draft: 37350
+  }[channel] ?? 37348
+
+  const storedEvents = (await nostrRelays.getEvents({
+    kinds: [kind],
+    authors: [await signer.getPublicKey()],
+    '#d': [dTagValue],
+    limit: 1
+  }, writeRelays)).result
+
+  if (storedEvents.length === 0) return null
+  return storedEvents.sort((a, b) => b.created_at - a.created_at)[0]
 }

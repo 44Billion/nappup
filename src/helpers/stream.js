@@ -18,3 +18,16 @@ export async function * streamToChunks (stream, chunkSize) {
 
   if (buffer.length > 0) yield buffer
 }
+
+export async function streamToText (stream) {
+  const reader = stream.getReader()
+  let result = ''
+  const decoder = new TextDecoder()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    result += decoder.decode(value, { stream: true })
+  }
+  result += decoder.decode()
+  return result
+}
