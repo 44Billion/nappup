@@ -262,7 +262,9 @@ async function maybeUploadStall ({
 
   const publishStall = async (event) => {
     const signedEvent = await signer.signEvent(event)
-    return await throttledSendEvent(signedEvent, writeRelays, { pause, log, trailingPause: true })
+    // App stores are fetching stall events just from primal relay for now
+    const relays = [...new Set([...writeRelays, 'wss://relay.primal.net'])]
+    return await throttledSendEvent(signedEvent, relays, { pause, log, trailingPause: true })
   }
 
   const createdAt = Math.floor(Date.now() / 1000)
