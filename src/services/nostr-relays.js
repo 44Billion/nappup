@@ -16,19 +16,19 @@ export const freeRelays = [
   'wss://relay.nostr.band'
 ]
 
-// Interacts with Nostr relays.
+// Interacts with Nostr relays
 export class NostrRelays {
   #relays = new Map()
   #relayTimeouts = new Map()
   #timeout = 30000 // 30 seconds
 
-  // Get a relay connection, creating one if it doesn't exist.
+  // Get a relay connection, creating one if it doesn't exist
   async #getRelay (url) {
     if (this.#relays.has(url)) {
       clearTimeout(this.#relayTimeouts.get(url))
       this.#relayTimeouts.set(url, maybeUnref(setTimeout(() => this.disconnect(url), this.#timeout)))
       const relay = this.#relays.get(url)
-      // reconnect if needed to avoid SendingOnClosedConnection errors
+      // Reconnect if needed to avoid SendingOnClosedConnection errors
       await relay.connect()
       return relay
     }
@@ -43,7 +43,7 @@ export class NostrRelays {
     return relay
   }
 
-  // Disconnect from a relay.
+  // Disconnect from a relay
   async disconnect (url) {
     if (this.#relays.has(url)) {
       const relay = this.#relays.get(url)
@@ -54,7 +54,7 @@ export class NostrRelays {
     }
   }
 
-  // Disconnect from all relays.
+  // Disconnect from all relays
   async disconnectAll () {
     for (const url of this.#relays.keys()) {
       await this.disconnect(url)
@@ -64,17 +64,14 @@ export class NostrRelays {
   // Get events from a list of relays
   async getEvents (filter, relays, timeout = 5000) {
     const events = []
-    const resolveOrReject = (resolve, reject, err) => {
-      err ? reject(err) : resolve()
-    }
     const promises = relays.map(async (url) => {
       let sub
       let isClosed = false
       const p = Promise.withResolvers()
       const timer = maybeUnref(setTimeout(() => {
-        sub?.close()
         isClosed = true
-        resolveOrReject(p.resolve, p.reject, new Error(`timeout: ${url}`))
+        sub?.close()
+        p.reject(new Error(`timeout: ${url}`))
       }, timeout))
       try {
         const relay = await this.#getRelay(url)
@@ -85,7 +82,8 @@ export class NostrRelays {
           onclose: err => {
             clearTimeout(timer)
             if (isClosed) return
-            resolveOrReject(p.resolve, p.reject, err /* may be empty (closed normally) */)
+            // May have closed normally, without error
+            err ? p.reject(err) : p.resolve()
           },
           oneose: () => {
             clearTimeout(timer)
@@ -94,12 +92,12 @@ export class NostrRelays {
             p.resolve()
           }
         })
-
-        await p.promise
       } catch (err) {
         clearTimeout(timer)
         p.reject(err)
       }
+
+      return p.promise
     })
 
     const results = await Promise.allSettled(promises)
@@ -112,26 +110,30 @@ export class NostrRelays {
     }
   }
 
-  // Send an event to a list of relays.
+  // Send an event to a list of relays
   async sendEvent (event, relays, timeout = 3000) {
     const promises = relays.map(async (url) => {
       let timer
+      const p = Promise.withResolvers()
       try {
         timer = maybeUnref(setTimeout(() => {
-          throw new Error(`timeout: ${url}`)
+          p.reject(new Error(`timeout: ${url}`))
         }, timeout))
+
         const relay = await this.#getRelay(url)
         await relay.publish(event)
+        p.resolve()
       } catch (err) {
-        if (err.message?.startsWith('duplicate:')) return
+        if (err.message?.startsWith('duplicate:')) return p.resolve()
         if (err.message?.startsWith('mute:')) {
           console.info(`${url} - ${err.message}`)
-          return
+          return p.resolve()
         }
-        throw err
+        p.reject(err)
       } finally {
         clearTimeout(timer)
       }
+      return p.promise
     })
 
     const results = await Promise.allSettled(promises)
@@ -144,6 +146,7 @@ export class NostrRelays {
     }
   }
 }
-// Share same connection.
-// Connections aren't authenticated, thus no need to split by authed user.
+
+// Share same connection
+// Connections aren't authenticated, thus no need to split by authed user
 export default new NostrRelays()
