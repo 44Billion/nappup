@@ -1,5 +1,6 @@
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
 import { bytesToBase62, base62ToBytes, BASE62_ALPHABET } from '#helpers/base62.js'
+import { encode as bech32Encode, decode as bech32Decode, toWords, fromWords } from '#helpers/bech32.js'
 import { isNostrAppDTagSafe } from '#helpers/app.js'
 
 const MAX_SIZE = 5000
@@ -56,6 +57,22 @@ export function appDecode (entity) {
     channel,
     relays: tlv[1] ? tlv[1].map(url => textDecoder.decode(url)) : []
   }
+}
+
+export function nsecEncode (hex) {
+  const bytes = base16ToBytes(hex)
+  const words = toWords(bytes)
+  return bech32Encode('nsec', words)
+}
+
+export function nsecDecode (nsec) {
+  const decoded = bech32Decode(nsec, MAX_SIZE)
+  if (!decoded) throw new Error('Invalid nsec')
+  const { hrp, data } = decoded
+  if (hrp !== 'nsec') throw new Error('Invalid nsec')
+  const bytes = fromWords(data)
+  if (bytes.length !== 32) throw new Error('Invalid nsec length')
+  return bytesToBase16(new Uint8Array(bytes))
 }
 
 function toTlv (tlvConfig) {

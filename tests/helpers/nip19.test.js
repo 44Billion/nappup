@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { appEncode, appDecode } from '#helpers/nip19.js'
+import { appEncode, appDecode, nsecEncode, nsecDecode } from '#helpers/nip19.js'
 
 describe('appEncode/appDecode', () => {
   it('should encode and decode an app reference', () => {
@@ -55,5 +55,15 @@ describe('appEncode/appDecode', () => {
     assert.ok(encoded.startsWith('+++'))
     assert.equal(channel, 'draft')
     assert.deepEqual(decoded, ref)
+  })
+})
+
+describe('nsecEncode/nsecDecode', () => {
+  it('should encode and decode an nsec', () => {
+    const hex = 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5'
+    const encoded = nsecEncode(hex)
+    assert.ok(encoded.startsWith('nsec'))
+    const decoded = nsecDecode(encoded)
+    assert.equal(decoded, hex)
   })
 })
