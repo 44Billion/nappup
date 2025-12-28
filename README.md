@@ -26,7 +26,7 @@ nappup [directory] [options]
 
 | Flag | Description |
 |------|-------------|
-| `-s <secret_key>` | Your Nostr secret key (hex format) used to sign the application event. See [Authentication](#authentication) for alternatives. |
+| `-s <secret_key>` | Your Nostr secret key (hex or nsec format) used to sign the application event. See [Authentication](#authentication) for alternatives. |
 | `-d <d_tag>` | The unique identifier (`d` tag) for your application. If omitted, defaults to the directory name. Avoid generic names like `dist` or `build` - use something unique among your other apps like `mycoolapp`. |
 | `-r` | Force re-upload. By default, Napp Up! might skip files that haven't changed. Use this flag to ensure everything is pushed fresh. |
 | `--main` | Publish to the **main** release channel. This is the default behavior. |
@@ -37,36 +37,34 @@ nappup [directory] [options]
 
 Napp Up! supports multiple ways to provide your Nostr secret key:
 
-1. **CLI flag**: Pass your hex-encoded secret key directly via `-s`:
+1. **CLI flag**: Pass your secret key (hex or nsec) directly via `-s`:
    ```bash
-   nappup -s 0123456789abcdef...
+   nappup -s nsec1...
    ```
 
 2. **Environment variable**: Set `NOSTR_SECRET_KEY` in your environment or a `.env` file:
    ```bash
-   export NOSTR_SECRET_KEY=0123456789abcdef...
+   export NOSTR_SECRET_KEY=nsec1...
    nappup ./dist
    ```
 
-3. **Auto-generated key**: If no key is provided, Napp Up! will generate a new keypair automatically and store it in your project's `.env` file for future use.
-
-> **Note**: The secret key must be in **hex format**. If you have an `nsec`, convert it to hex first.
+3. **Auto-generated key**: If no key is provided, Napp Up! will generate a new keypair automatically and store it (as nsec) in your project's `.env` file for future use.
 
 ### Examples
 
 Upload the current directory to the main channel:
 ```bash
-nappup -s 0123456789abcdef...
+nappup -s nsec1...
 ```
 
 Or using an environment variable:
 ```bash
-NOSTR_SECRET_KEY=0123456789abcdef... nappup
+NOSTR_SECRET_KEY=nsec1... nappup
 ```
 
 Upload a specific `dist` folder with a custom identifier to the `next` channel:
 ```bash
-nappup ./dist -s 0123456789abcdef... -d myapp --next
+nappup ./dist -s nsec1... -d myapp --next
 ```
 
 Force re-upload a draft:

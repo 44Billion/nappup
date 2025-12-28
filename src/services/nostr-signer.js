@@ -7,6 +7,7 @@ import { getConversationKey, encrypt, decrypt } from 'nostr-tools/nip44'
 import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
 import { finalizeEvent } from '#helpers/nip01.js'
+import { nsecDecode, nsecEncode } from '#helpers/nip19.js'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env`
@@ -34,21 +35,26 @@ export default class NostrSigner {
     this.#secretKey = skBytes
   }
 
-  static async create (skHex) {
-    if (skHex) return new this(createToken, base16ToBytes(skHex))
+  static async create (sk) {
+    if (sk) {
+      if (sk.startsWith('nsec')) sk = nsecDecode(sk)
+      return new this(createToken, base16ToBytes(sk))
+    }
 
     let skBytes
     let isNewSk = false
     if (process.env.NOSTR_SECRET_KEY) {
-      skBytes = base16ToBytes(process.env.NOSTR_SECRET_KEY)
+      let envSk = process.env.NOSTR_SECRET_KEY
+      if (envSk.startsWith('nsec')) envSk = nsecDecode(envSk)
+      skBytes = base16ToBytes(envSk)
     } else {
       isNewSk = true
-      skHex = generateSecretKey()
-      fs.appendFileSync(path.resolve(dotenvPath), `NOSTR_SECRET_KEY=${skHex}\n`)
-      skBytes = base16ToBytes(skHex)
+      sk = generateSecretKey()
+      fs.appendFileSync(path.resolve(dotenvPath), `NOSTR_SECRET_KEY=${nsecEncode(sk)}\n`)
+      skBytes = base16ToBytes(sk)
     }
     const ret = new this(createToken, skBytes)
-    if (isNewSk) await ret.#initSk(skHex)
+    if (isNewSk) await ret.#initSk(sk)
     return ret
   }
 
