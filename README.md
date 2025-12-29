@@ -28,6 +28,7 @@ nappup [directory] [options]
 |------|-------------|
 | `-s <secret_key>` | Your Nostr secret key (hex or nsec format) used to sign the application event. See [Authentication](#authentication) for alternatives. |
 | `-d <d_tag>` | The unique identifier (`d` tag) for your application. If omitted, defaults to the directory name. Avoid generic names like `dist` or `build` - use something unique among your other apps like `mycoolapp`. |
+| `-y` | Skip confirmation prompt. Useful for CI/CD pipelines or automated scripts. |
 | `-r` | Force re-upload. By default, Napp Up! might skip files that haven't changed. Use this flag to ensure everything is pushed fresh. |
 | `--main` | Publish to the **main** release channel. This is the default behavior. |
 | `--next` | Publish to the **next** release channel. Ideal for beta testing or staging builds. |

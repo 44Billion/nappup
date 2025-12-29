@@ -11,6 +11,7 @@ export function parseArgs (args) {
   let dTag = null
   let channel = null
   let shouldReupload = false
+  let yes = false
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-s' && args[i + 1]) {
@@ -27,6 +28,8 @@ export function parseArgs (args) {
       channel = 'draft'
     } else if (args[i] === '-r') {
       shouldReupload = true
+    } else if (args[i] === '-y') {
+      yes = true
     } else if (!args[i].startsWith('-') && dir === null) {
       dir = args[i]
     }
@@ -37,11 +40,13 @@ export function parseArgs (args) {
     sk,
     dTag,
     channel: channel || 'main',
-    shouldReupload
+    shouldReupload,
+    yes
   }
 }
 
 export async function confirmArgs (args) {
+  if (args.yes) return
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout

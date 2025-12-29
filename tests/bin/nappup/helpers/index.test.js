@@ -47,6 +47,11 @@ describe('bin/index.js', () => {
       assert.strictEqual(sk, null)
       assert.strictEqual(dTag, null)
     })
+
+    it('should parse the yes flag', () => {
+      const { yes } = parseArgs(['-y'])
+      assert.strictEqual(yes, true)
+    })
   })
 
   describe('getFiles()', () => {
