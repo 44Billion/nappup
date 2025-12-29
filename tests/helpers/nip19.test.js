@@ -66,4 +66,15 @@ describe('nsecEncode/nsecDecode', () => {
     const decoded = nsecDecode(encoded)
     assert.equal(decoded, hex)
   })
+
+  it('should decode a known valid nsec and re-encode it correctly', () => {
+    const nsec = 'nsec17anezd798fvwv949gcpmrmrqqw22u0xtdh96xevyfe4jm08zzphskqhtpy'
+    const expectedHex = 'f7679137c53a58e616a54603b1ec600394ae3ccb6dcba365844e6b2dbce2106f'
+
+    const decoded = nsecDecode(nsec)
+    assert.equal(decoded, expectedHex)
+
+    const reEncoded = nsecEncode(decoded)
+    assert.equal(reEncoded, nsec)
+  })
 })
