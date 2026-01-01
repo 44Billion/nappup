@@ -6,6 +6,7 @@ import NostrSigner from '#services/nostr-signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'
 import { isNostrAppDTagSafe, deriveNostrAppDTag } from '#helpers/app.js'
 import { extractHtmlMetadata, findFavicon, findIndexFile } from '#helpers/app-metadata.js'
+import { NAPP_CATEGORIES } from '#config/napp-categories.js'
 
 export default async function (...args) {
   try {
@@ -34,14 +35,29 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
   let nmmr
   const fileMetadata = []
 
+  // Check for .well-known/napp.json
+  const nappJsonFile = fileList.find(f => f.webkitRelativePath.split('/').slice(1).join('/') === '.well-known/napp.json')
+  let nappJson = {}
+  if (nappJsonFile) {
+    try {
+      const text = await streamToText(nappJsonFile.stream())
+      nappJson = JSON.parse(text)
+      fileList = fileList.filter(f => f !== nappJsonFile)
+    } catch (e) {
+      log('Failed to parse .well-known/napp.json', e)
+    }
+  }
+
   const indexFile = findIndexFile(fileList)
-  let stallName, stallSummary
-  if (indexFile) {
+  let stallName = nappJson.stallName?.[0]?.[0]
+  let stallSummary = nappJson.stallSummary?.[0]?.[0]
+
+  if (indexFile && (!stallName || !stallSummary)) {
     try {
       const htmlContent = await streamToText(indexFile.stream())
       const { name, description } = extractHtmlMetadata(htmlContent)
-      stallName = name
-      stallSummary = description
+      if (!stallName) stallName = name
+      if (!stallSummary) stallSummary = description
     } catch (err) {
       log('Error extracting HTML metadata:', err)
     }
@@ -49,8 +65,41 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
   const faviconFile = findFavicon(fileList)
   let iconMetadata
 
-  log(`Processing ${fileList.length} files`)
   let pause = 1000
+
+  // Upload icon from napp.json if present
+  if (nappJson.stallIcon?.[0]?.[0]) {
+    try {
+      const dataUrl = nappJson.stallIcon[0][0]
+      const res = await fetch(dataUrl)
+      const blob = await res.blob()
+      const mimeType = blob.type
+      const extension = mimeType.split('/')[1] || 'bin'
+      const filename = `icon.${extension}`
+
+      log('Uploading icon from napp.json')
+
+      nmmr = new NMMR()
+      const stream = blob.stream()
+      let chunkLength = 0
+      for await (const chunk of streamToChunks(stream, 51000)) {
+        chunkLength++
+        await nmmr.append(chunk)
+      }
+
+      if (chunkLength) {
+        ;({ pause } = (await uploadBinaryDataChunks({ nmmr, signer: nostrSigner, filename, chunkLength, log, pause, mimeType, shouldReupload })))
+        iconMetadata = {
+          rootHash: nmmr.getRoot(),
+          mimeType
+        }
+      }
+    } catch (e) {
+      log('Failed to upload icon from napp.json', e)
+    }
+  }
+
+  log(`Processing ${fileList.length} files`)
   for (const file of fileList) {
     nmmr = new NMMR()
     const stream = file.stream()
@@ -85,12 +134,21 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
     dTag,
     channel,
     name: stallName,
+    nameLang: nappJson.stallName?.[0]?.[1],
+    isNameAuto: !nappJson.stallName?.[0]?.[0],
     summary: stallSummary,
+    summaryLang: nappJson.stallSummary?.[0]?.[1],
+    isSummaryAuto: !nappJson.stallSummary?.[0]?.[0],
     icon: iconMetadata,
+    isIconAuto: !nappJson.stallIcon?.[0]?.[0],
     signer: nostrSigner,
     writeRelays,
     log,
-    pause
+    pause,
+    self: nappJson.self?.[0]?.[0],
+    countries: nappJson.country,
+    categories: nappJson.category,
+    hashtags: nappJson.hashtag
   })))
 
   log(`Uploading bundle #${dTag}`)
@@ -244,18 +302,28 @@ async function maybeUploadStall ({
   dTag,
   channel,
   name,
+  nameLang,
+  isNameAuto,
   summary,
+  summaryLang,
+  isSummaryAuto,
   icon,
+  isIconAuto,
   signer,
   writeRelays,
   log,
-  pause
+  pause,
+  self,
+  countries,
+  categories,
+  hashtags
 }) {
   const trimmedName = typeof name === 'string' ? name.trim() : ''
   const trimmedSummary = typeof summary === 'string' ? summary.trim() : ''
   const iconRootHash = icon?.rootHash
   const iconMimeType = icon?.mimeType
-  const hasMetadata = Boolean(trimmedName) || Boolean(trimmedSummary) || Boolean(iconRootHash)
+  const hasMetadata = Boolean(trimmedName) || Boolean(trimmedSummary) || Boolean(iconRootHash) ||
+    Boolean(self) || (countries && countries.length > 0) || (categories && categories.length > 0) || (hashtags && hashtags.length > 0)
 
   const previous = await getPreviousStall(dTag, writeRelays, signer, channel)
   if (!previous && !hasMetadata) return { pause }
@@ -276,27 +344,63 @@ async function maybeUploadStall ({
 
   if (!previous) {
     const tags = [
-      ['d', dTag],
-      ['c', '*']
+      ['d', dTag]
     ]
+
+    if (countries && countries.length > 0) {
+      countries.forEach(c => tags.push(['c', c]))
+    } else {
+      tags.push(['c', '*'])
+    }
+
+    if (self) tags.push(['self', self])
+
+    if (categories) {
+      let count = 0
+      for (const [cat, subcats] of categories) {
+        if (count >= 3) break
+        if (Array.isArray(subcats)) {
+          for (const sub of subcats) {
+            if (count >= 3) break
+            if (NAPP_CATEGORIES[cat] && NAPP_CATEGORIES[cat].includes(sub)) {
+              tags.push(['l', `napp.${cat}:${sub}`])
+              count++
+            }
+          }
+        }
+      }
+    }
+
+    if (hashtags) {
+      hashtags.slice(0, 3).forEach(([tag, label]) => {
+        const t = tag.replace(/\s/g, '').toLowerCase()
+        const row = ['t', t]
+        if (label) row.push(label)
+        tags.push(row)
+      })
+    }
 
     let hasIcon = false
     let hasName = false
     if (iconRootHash && iconMimeType) {
       hasIcon = true
       tags.push(['icon', iconRootHash, iconMimeType])
-      tags.push(['auto', 'icon'])
+      if (isIconAuto) tags.push(['auto', 'icon'])
     }
 
     if (trimmedName) {
       hasName = true
-      tags.push(['name', trimmedName])
-      tags.push(['auto', 'name'])
+      const row = ['name', trimmedName]
+      if (nameLang) row.push(nameLang)
+      tags.push(row)
+      if (isNameAuto) tags.push(['auto', 'name'])
     }
 
     if (trimmedSummary) {
-      tags.push(['summary', trimmedSummary])
-      tags.push(['auto', 'summary'])
+      const row = ['summary', trimmedSummary]
+      if (summaryLang) row.push(summaryLang)
+      tags.push(row)
+      if (isSummaryAuto) tags.push(['auto', 'summary'])
     }
 
     if (!hasIcon || !hasName) return { pause }
@@ -313,6 +417,73 @@ async function maybeUploadStall ({
     ? previous.tags.map(tag => (Array.isArray(tag) ? [...tag] : tag))
     : []
   let changed = false
+
+  // Helper to remove tags by key
+  const removeTags = (key) => {
+    let idx
+    while ((idx = tags.findIndex(t => Array.isArray(t) && t[0] === key)) !== -1) {
+      tags.splice(idx, 1)
+      changed = true
+    }
+  }
+
+  // Helper to remove 'l' tags with specific prefix
+  const removeLTags = (prefix) => {
+    let idx
+    while ((idx = tags.findIndex(t => Array.isArray(t) && t[0] === 'l' && t[1].startsWith(prefix))) !== -1) {
+      tags.splice(idx, 1)
+      changed = true
+    }
+  }
+
+  // Update self
+  if (self) {
+    removeTags('self')
+    tags.push(['self', self])
+    changed = true
+  }
+
+  // Update countries
+  if (countries) {
+    removeTags('c')
+    if (countries.length === 0) {
+      tags.push(['c', '*'])
+    } else {
+      countries.forEach(c => tags.push(['c', c]))
+    }
+    changed = true
+  }
+
+  // Update categories
+  if (categories) {
+    removeLTags('napp.')
+    let count = 0
+    for (const [cat, subcats] of categories) {
+      if (count >= 3) break
+      if (Array.isArray(subcats)) {
+        for (const sub of subcats) {
+          if (count >= 3) break
+          if (NAPP_CATEGORIES[cat] && NAPP_CATEGORIES[cat].includes(sub)) {
+            tags.push(['l', `napp.${cat}:${sub}`])
+            count++
+          }
+        }
+      }
+    }
+    changed = true
+  }
+
+  // Update hashtags
+  if (hashtags) {
+    removeTags('t')
+    hashtags.slice(0, 3).forEach(([tag, label]) => {
+      const t = tag.replace(/\s/g, '').toLowerCase()
+      const row = ['t', t]
+      if (label) row.push(label)
+      tags.push(row)
+    })
+    changed = true
+  }
 
   const ensureTagValue = (key, updater) => {
     const index = tags.findIndex(tag => Array.isArray(tag) && tag[0] === key)
@@ -337,34 +508,53 @@ async function maybeUploadStall ({
     return ['d', dTag]
   })
 
-  ensureTagValue('c', (existing) => {
-    if (!existing) return ['c', '*']
-    const currentValue = typeof existing[1] === 'string' ? existing[1].trim() : ''
-    if (currentValue === '') return ['c', '*']
-    return existing
-  })
+  if (!countries) {
+    ensureTagValue('c', (existing) => {
+      if (!existing) return ['c', '*']
+      const currentValue = typeof existing[1] === 'string' ? existing[1].trim() : ''
+      if (currentValue === '') return ['c', '*']
+      return existing
+    })
+  }
 
   const hasAuto = (field) => tags.some(tag => Array.isArray(tag) && tag[0] === 'auto' && tag[1] === field)
-
-  if (trimmedName && hasAuto('name')) {
-    ensureTagValue('name', (existing) => {
-      if (existing && existing[1] === trimmedName) return existing
-      return ['name', trimmedName]
-    })
+  const removeAuto = (field) => {
+    const idx = tags.findIndex(tag => Array.isArray(tag) && tag[0] === 'auto' && tag[1] === field)
+    if (idx !== -1) {
+      tags.splice(idx, 1)
+      changed = true
+    }
   }
 
-  if (trimmedSummary && hasAuto('summary')) {
-    ensureTagValue('summary', (existing) => {
-      if (existing && existing[1] === trimmedSummary) return existing
-      return ['summary', trimmedSummary]
-    })
+  if (trimmedName) {
+    if (!isNameAuto || hasAuto('name')) {
+      ensureTagValue('name', (_) => {
+        const row = ['name', trimmedName]
+        if (nameLang) row.push(nameLang)
+        return row
+      })
+      if (!isNameAuto) removeAuto('name')
+    }
   }
 
-  if (iconRootHash && iconMimeType && hasAuto('icon')) {
-    ensureTagValue('icon', (existing) => {
-      if (existing && existing[1] === iconRootHash && existing[2] === iconMimeType) return existing
-      return ['icon', iconRootHash, iconMimeType]
-    })
+  if (trimmedSummary) {
+    if (!isSummaryAuto || hasAuto('summary')) {
+      ensureTagValue('summary', (_) => {
+        const row = ['summary', trimmedSummary]
+        if (summaryLang) row.push(summaryLang)
+        return row
+      })
+      if (!isSummaryAuto) removeAuto('summary')
+    }
+  }
+
+  if (iconRootHash && iconMimeType) {
+    if (!isIconAuto || hasAuto('icon')) {
+      ensureTagValue('icon', (_) => {
+        return ['icon', iconRootHash, iconMimeType]
+      })
+      if (!isIconAuto) removeAuto('icon')
+    }
   }
 
   if (!changed) return { pause }
