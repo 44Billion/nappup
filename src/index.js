@@ -16,7 +16,7 @@ export default async function (...args) {
   }
 }
 
-export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, channel = 'main', shouldReupload = false } = {}) {
+export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTagRaw, channel = 'main', shouldReupload = false } = {}) {
   if (!nostrSigner && typeof window !== 'undefined') nostrSigner = window.nostr
   if (!nostrSigner) throw new Error('No Nostr signer found')
   if (typeof window !== 'undefined' && nostrSigner === window.nostr) {
@@ -29,7 +29,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, chan
   if (typeof dTag === 'string') {
     if (!isNostrAppDTagSafe(dTag)) throw new Error('dTag should be [A-Za-z0-9] with length ranging from 1 to 19')
   } else {
-    dTag = fileList[0].webkitRelativePath.split('/')[0].trim()
+    dTag = dTagRaw || fileList[0].webkitRelativePath.split('/')[0].trim()
     if (!isNostrAppDTagSafe(dTag)) dTag = await deriveNostrAppDTag(dTag || Math.random().toString(36))
   }
   let nmmr
