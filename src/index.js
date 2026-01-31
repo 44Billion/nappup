@@ -330,8 +330,8 @@ async function maybeUploadStall ({
 
   const publishStall = async (event) => {
     const signedEvent = await signer.signEvent(event)
-    // App stores are fetching stall events just from primal relay for now
-    const relays = [...new Set([...writeRelays, 'wss://relay.primal.net'])]
+    // App stores are fetching stall events just from 44b relay for now
+    const relays = [...new Set([...writeRelays, 'wss://relay.44billion.net'])]
     return await throttledSendEvent(signedEvent, relays, { pause, log, trailingPause: true })
   }
 
