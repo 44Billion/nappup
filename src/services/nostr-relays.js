@@ -15,6 +15,9 @@ export const freeRelays = [
   'wss://relay.damus.io',
   'wss://relay.nostr.band'
 ]
+export const nappRelays = [
+  'wss://relay.44billion.net'
+]
 
 // Interacts with Nostr relays
 export class NostrRelays {

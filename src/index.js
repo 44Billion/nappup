@@ -1,7 +1,7 @@
 import NMMR from 'nmmr'
 import { appEncode } from '#helpers/nip19.js'
 import Base93Encoder from '#services/base93-encoder.js'
-import nostrRelays from '#services/nostr-relays.js'
+import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
 import NostrSigner from '#services/nostr-signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'
 import { isNostrAppDTagSafe, deriveNostrAppDTag } from '#helpers/app.js'
@@ -188,8 +188,10 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
     }
 
     const event = await signer.signEvent(binaryDataChunk)
-    log(`${filename}: Uploading file part ${++chunkIndex} of ${chunkLength} to ${writeRelays.length} relays`)
-    ;({ pause } = (await throttledSendEvent(event, writeRelays, { pause, log, trailingPause: true })))
+    const relays = [...new Set([...writeRelays, ...nappRelays])]
+    const fallbackRelayCount = relays.length - writeRelays.length
+    log(`${filename}: Uploading file part ${++chunkIndex} of ${chunkLength} to ${writeRelays.length} relays${fallbackRelayCount > 0 ? ` (+${fallbackRelayCount} fallback)` : ''}`)
+    ;({ pause } = (await throttledSendEvent(event, relays, { pause, log, trailingPause: true })))
   }
   return { pause }
 }
@@ -245,7 +247,7 @@ async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signe
     authors: [await signer.getPublicKey()],
     '#d': [dTagValue],
     limit: 1
-  }, writeRelays)).result
+  }, [...new Set([...writeRelays, ...nappRelays])])).result
 
   let hasCurrentCtag = false
   const hasEvent = storedEvents.length > 0
@@ -294,7 +296,7 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0 })
     created_at: Math.floor(Date.now() / 1000)
   }
   const event = await signer.signEvent(appBundle)
-  await throttledSendEvent(event, (await signer.getRelays()).write, { pause, trailingPause: true })
+  await throttledSendEvent(event, [...new Set([...(await signer.getRelays()).write, ...nappRelays])], { pause, trailingPause: true })
   return event
 }
 
@@ -330,8 +332,7 @@ async function maybeUploadStall ({
 
   const publishStall = async (event) => {
     const signedEvent = await signer.signEvent(event)
-    // App stores are fetching stall events just from 44b relay for now
-    const relays = [...new Set([...writeRelays, 'wss://relay.44billion.net'])]
+    const relays = [...new Set([...writeRelays, ...nappRelays])]
     return await throttledSendEvent(signedEvent, relays, { pause, log, trailingPause: true })
   }
 
@@ -579,7 +580,7 @@ async function getPreviousStall (dTagValue, writeRelays, signer, channel) {
     authors: [await signer.getPublicKey()],
     '#d': [dTagValue],
     limit: 1
-  }, writeRelays)).result
+  }, [...new Set([...writeRelays, ...nappRelays])])).result
 
   if (storedEvents.length === 0) return null
   return storedEvents.sort((a, b) => b.created_at - a.created_at)[0]
