@@ -151,8 +151,8 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
     hashtags: nappJson.hashtag
   })))
 
-  log(`Uploading bundle #${dTag}`)
-  const bundle = await uploadBundle({ dTag, channel, fileMetadata, signer: nostrSigner, pause })
+  log(`Uploading bundle ${dTag}`)
+  const bundle = await uploadBundle({ dTag, channel, fileMetadata, signer: nostrSigner, pause, shouldReupload, log })
 
   const appEntity = appEncode({
     dTag: bundle.tags.find(v => v[0] === 'd')[1],
@@ -280,23 +280,65 @@ async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signe
   return { otherCtags, hasEvent, hasCurrentCtag }
 }
 
-async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0 }) {
+async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, shouldReupload = false, log = () => {} }) {
   const kind = {
     main: 37448, // stable
     next: 37449, // insider
     draft: 37450 // vibe coded preview
   }[channel] ?? 37448
+
+  const fileTags = fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType])
+  const tags = [
+    ['d', dTag],
+    ...fileTags
+  ]
+
+  const writeRelays = [...new Set([...(await signer.getRelays()).write, ...nappRelays])]
+
+  if (!shouldReupload) {
+    const events = (await nostrRelays.getEvents({
+      kinds: [kind],
+      authors: [await signer.getPublicKey()],
+      '#d': [dTag]
+    }, writeRelays)).result
+
+    if (events.length > 0) {
+      events.sort((a, b) => {
+        if (b.created_at !== a.created_at) return b.created_at - a.created_at
+        if (a.id < b.id) return -1
+        if (a.id > b.id) return 1
+        return 0
+      })
+
+      const mostRecentEvent = events[0]
+      const recentFileTags = mostRecentEvent.tags.filter(t => t[0] === 'file')
+
+      const isSame = fileTags.length === recentFileTags.length && fileTags.every((t, i) => {
+        const rt = recentFileTags[i]
+        return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3]
+      })
+
+      if (isSame) {
+        log(`Bundle based on ${fileTags.length} files is up to date (id: ${mostRecentEvent.id} - created_at: ${new Date(mostRecentEvent.created_at * 1000).toISOString()})`)
+        if (events.length === writeRelays.length && events.every(e => e.id === mostRecentEvent.id)) return mostRecentEvent
+
+        // nostrRelays.getEvents currently doesn't tell us which event came from which relay,
+        // so we re-upload to all relays to ensure consistency
+        log(`Re-uploading existing bundle event to all ${writeRelays.length} relays`)
+        await throttledSendEvent(mostRecentEvent, writeRelays, { pause, trailingPause: true, log })
+        return mostRecentEvent
+      }
+    }
+  }
+
   const appBundle = {
     kind,
-    tags: [
-      ['d', dTag],
-      ...fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType])
-    ],
+    tags,
     content: '',
     created_at: Math.floor(Date.now() / 1000)
   }
   const event = await signer.signEvent(appBundle)
-  await throttledSendEvent(event, [...new Set([...(await signer.getRelays()).write, ...nappRelays])], { pause, trailingPause: true })
+  await throttledSendEvent(event, writeRelays, { pause, trailingPause: true, log })
   return event
 }
 
