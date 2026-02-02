@@ -80,6 +80,7 @@ export class NostrRelays {
         const relay = await this.#getRelay(url)
         sub = relay.subscribe([filter], {
           onevent: (event) => {
+            event.meta = { relay: url }
             events.push(event)
           },
           onclose: err => {
@@ -115,6 +116,9 @@ export class NostrRelays {
 
   // Send an event to a list of relays
   async sendEvent (event, relays, timeout = 3000) {
+    const eventToSend = event.meta ? { ...event } : event
+    if (eventToSend.meta) delete eventToSend.meta
+
     const promises = relays.map(async (url) => {
       let timer
       const p = Promise.withResolvers()
@@ -124,7 +128,7 @@ export class NostrRelays {
         }, timeout))
 
         const relay = await this.#getRelay(url)
-        await relay.publish(event)
+        await relay.publish(eventToSend)
         p.resolve()
       } catch (err) {
         if (err.message?.startsWith('duplicate:')) return p.resolve()

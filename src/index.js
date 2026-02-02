@@ -170,14 +170,14 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
   for await (const chunk of nmmr.getChunks()) {
     const dTag = chunk.x
     const currentCtag = `${chunk.rootX}:${chunk.index}`
-    const { otherCtags, hasCurrentCtag, foundEvent, isFullyReplicated } = await getPreviousCtags(dTag, currentCtag, relays, signer)
+    const { otherCtags, hasCurrentCtag, foundEvent, missingRelays } = await getPreviousCtags(dTag, currentCtag, relays, signer)
     if (!shouldReupload && hasCurrentCtag) {
-      if (isFullyReplicated) {
+      if (missingRelays.length === 0) {
         log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
         continue
       }
-      log(`${filename}: Re-uploading chunk ${++chunkIndex} of ${chunkLength} to ensure replication`)
-      ;({ pause } = (await throttledSendEvent(foundEvent, relays, { pause, log, trailingPause: true })))
+      log(`${filename}: Re-uploading chunk ${++chunkIndex} of ${chunkLength} to ${missingRelays.length} missing relays (out of ${relays.length})`)
+      ;({ pause } = (await throttledSendEvent(foundEvent, missingRelays, { pause, log, trailingPause: true })))
       continue
     }
     const binaryDataChunk = {
@@ -222,7 +222,7 @@ async function throttledSendEvent (event, relays, {
       else r[1].push(v)
       return r
     }, [[], []])
-  log(`${unretryableErrors.length} Unretryable errors\n: ${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
+  log(`${unretryableErrors.length} Unretryable errors:\n${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
   const unretryableErrorsLength = errors.length - rateLimitErrors.length
   const maybeSuccessfulRelays = relays.length - unretryableErrorsLength
   const hasReachedMaxRetries = retries > maxRetries
@@ -286,9 +286,11 @@ async function getPreviousCtags (dTagValue, currentCtagValue, relays, signer) {
       return isCTag && isntDuplicate
     })
 
-  const isFullyReplicated = storedEvents.filter(e => e.id === bestEvent.id).length === targetRelays.length
+  const matchingEvents = storedEvents.filter(e => e.id === bestEvent.id)
+  const coveredRelays = new Set(matchingEvents.map(e => e.meta?.relay).filter(Boolean))
+  const missingRelays = targetRelays.filter(r => !coveredRelays.has(r))
 
-  return { otherCtags, hasEvent, hasCurrentCtag, foundEvent: bestEvent, isFullyReplicated }
+  return { otherCtags, hasEvent, hasCurrentCtag, foundEvent: bestEvent, missingRelays }
 }
 
 async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, shouldReupload = false, log = () => {} }) {
@@ -332,12 +334,17 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
 
       if (isSame) {
         log(`Bundle based on ${fileTags.length} files is up-to-date (id: ${mostRecentEvent.id} - created_at: ${new Date(mostRecentEvent.created_at * 1000).toISOString()})`)
-        if (events.length === writeRelays.length && events.every(e => e.id === mostRecentEvent.id)) return mostRecentEvent
+
+        const matchingEvents = events.filter(e => e.id === mostRecentEvent.id)
+        const coveredRelays = new Set(matchingEvents.map(e => e.meta?.relay).filter(Boolean))
+        const missingRelays = writeRelays.filter(r => !coveredRelays.has(r))
+
+        if (missingRelays.length === 0) return mostRecentEvent
 
         // nostrRelays.getEvents currently doesn't tell us which event came from which relay,
         // so we re-upload to all relays to ensure consistency
-        log(`Re-uploading existing bundle event to all ${writeRelays.length} relays`)
-        await throttledSendEvent(mostRecentEvent, writeRelays, { pause, trailingPause: true, log })
+        log(`Re-uploading existing bundle event to ${missingRelays.length} missing relays (out of ${writeRelays.length})`)
+        await throttledSendEvent(mostRecentEvent, missingRelays, { pause, trailingPause: true, log })
         return mostRecentEvent
       }
     }
@@ -615,11 +622,16 @@ async function maybeUploadStall ({
   }
 
   if (!changed) {
-    const { storedEvents, targetRelayCount } = previousResult
-    if (storedEvents.length === targetRelayCount && storedEvents.every(e => e.id === previous.id)) return { pause }
+    const { storedEvents } = previousResult
 
-    log(`Re-uploading existing stall event to all ${relays.length} relays`)
-    return await throttledSendEvent(previous, relays, { pause, log, trailingPause: true })
+    const matchingEvents = storedEvents.filter(e => e.id === previous.id)
+    const coveredRelays = new Set(matchingEvents.map(e => e.meta?.relay).filter(Boolean))
+    const missingRelays = relays.filter(r => !coveredRelays.has(r))
+
+    if (missingRelays.length === 0) return { pause }
+
+    log(`Re-uploading existing stall event to ${missingRelays.length} missing relays (out of ${relays.length})`)
+    return await throttledSendEvent(previous, missingRelays, { pause, log, trailingPause: true })
   }
 
   return await publishStall({
