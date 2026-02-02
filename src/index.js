@@ -170,9 +170,14 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
   for await (const chunk of nmmr.getChunks()) {
     const dTag = chunk.x
     const currentCtag = `${chunk.rootX}:${chunk.index}`
-    const { otherCtags, hasCurrentCtag } = await getPreviousCtags(dTag, currentCtag, relays, signer)
+    const { otherCtags, hasCurrentCtag, foundEvent, isFullyReplicated } = await getPreviousCtags(dTag, currentCtag, relays, signer)
     if (!shouldReupload && hasCurrentCtag) {
-      log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
+      if (isFullyReplicated) {
+        log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
+        continue
+      }
+      log(`${filename}: Re-uploading chunk ${++chunkIndex} of ${chunkLength} to ensure replication`)
+      ;({ pause } = (await throttledSendEvent(foundEvent, relays, { pause, log, trailingPause: true })))
       continue
     }
     const binaryDataChunk = {
@@ -241,20 +246,24 @@ async function throttledSendEvent (event, relays, {
   })
 }
 
-async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signer) {
+async function getPreviousCtags (dTagValue, currentCtagValue, relays, signer) {
+  const targetRelays = [...new Set([...relays, ...nappRelays])]
   const storedEvents = (await nostrRelays.getEvents({
     kinds: [34600],
     authors: [await signer.getPublicKey()],
     '#d': [dTagValue],
     limit: 1
-  }, [...new Set([...writeRelays, ...nappRelays])])).result
+  }, targetRelays)).result
 
   let hasCurrentCtag = false
   const hasEvent = storedEvents.length > 0
   if (!hasEvent) return { otherCtags: [], hasEvent, hasCurrentCtag }
 
   const cTagValues = { [currentCtagValue]: true }
-  const prevTags = storedEvents.sort((a, b) => b.created_at - a.created_at)[0].tags
+  storedEvents.sort((a, b) => b.created_at - a.created_at)
+  const bestEvent = storedEvents[0]
+  const prevTags = bestEvent.tags
+
   if (!Array.isArray(prevTags)) return { otherCtags: [], hasEvent, hasCurrentCtag }
 
   hasCurrentCtag = prevTags.some(tag =>
@@ -277,7 +286,9 @@ async function getPreviousCtags (dTagValue, currentCtagValue, writeRelays, signe
       return isCTag && isntDuplicate
     })
 
-  return { otherCtags, hasEvent, hasCurrentCtag }
+  const isFullyReplicated = storedEvents.filter(e => e.id === bestEvent.id).length === targetRelays.length
+
+  return { otherCtags, hasEvent, hasCurrentCtag, foundEvent: bestEvent, isFullyReplicated }
 }
 
 async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, shouldReupload = false, log = () => {} }) {
