@@ -165,11 +165,12 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
 
 async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, log, pause = 0, mimeType, shouldReupload = false }) {
   const writeRelays = (await signer.getRelays()).write
+  const relays = [...new Set([...writeRelays, ...nappRelays])]
   let chunkIndex = 0
   for await (const chunk of nmmr.getChunks()) {
     const dTag = chunk.x
     const currentCtag = `${chunk.rootX}:${chunk.index}`
-    const { otherCtags, hasCurrentCtag } = await getPreviousCtags(dTag, currentCtag, writeRelays, signer)
+    const { otherCtags, hasCurrentCtag } = await getPreviousCtags(dTag, currentCtag, relays, signer)
     if (!shouldReupload && hasCurrentCtag) {
       log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
       continue
@@ -188,7 +189,6 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
     }
 
     const event = await signer.signEvent(binaryDataChunk)
-    const relays = [...new Set([...writeRelays, ...nappRelays])]
     const fallbackRelayCount = relays.length - writeRelays.length
     log(`${filename}: Uploading file part ${++chunkIndex} of ${chunkLength} to ${writeRelays.length} relays${fallbackRelayCount > 0 ? ` (+${fallbackRelayCount} fallback)` : ''}`)
     ;({ pause } = (await throttledSendEvent(event, relays, { pause, log, trailingPause: true })))
@@ -299,7 +299,8 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
     const events = (await nostrRelays.getEvents({
       kinds: [kind],
       authors: [await signer.getPublicKey()],
-      '#d': [dTag]
+      '#d': [dTag],
+      limit: 1
     }, writeRelays)).result
 
     if (events.length > 0) {
@@ -319,7 +320,7 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
       })
 
       if (isSame) {
-        log(`Bundle based on ${fileTags.length} files is up to date (id: ${mostRecentEvent.id} - created_at: ${new Date(mostRecentEvent.created_at * 1000).toISOString()})`)
+        log(`Bundle based on ${fileTags.length} files is up-to-date (id: ${mostRecentEvent.id} - created_at: ${new Date(mostRecentEvent.created_at * 1000).toISOString()})`)
         if (events.length === writeRelays.length && events.every(e => e.id === mostRecentEvent.id)) return mostRecentEvent
 
         // nostrRelays.getEvents currently doesn't tell us which event came from which relay,
