@@ -370,12 +370,14 @@ async function maybeUploadStall ({
   const hasMetadata = Boolean(trimmedName) || Boolean(trimmedSummary) || Boolean(iconRootHash) ||
     Boolean(self) || (countries && countries.length > 0) || (categories && categories.length > 0) || (hashtags && hashtags.length > 0)
 
-  const previous = await getPreviousStall(dTag, writeRelays, signer, channel)
+  const relays = [...new Set([...writeRelays, ...nappRelays])]
+
+  const previousResult = await getPreviousStall(dTag, relays, signer, channel)
+  const previous = previousResult?.previous
   if (!previous && !hasMetadata) return { pause }
 
   const publishStall = async (event) => {
     const signedEvent = await signer.signEvent(event)
-    const relays = [...new Set([...writeRelays, ...nappRelays])]
     return await throttledSendEvent(signedEvent, relays, { pause, log, trailingPause: true })
   }
 
@@ -601,7 +603,13 @@ async function maybeUploadStall ({
     }
   }
 
-  if (!changed) return { pause }
+  if (!changed) {
+    const { storedEvents, targetRelayCount } = previousResult
+    if (storedEvents.length === targetRelayCount && storedEvents.every(e => e.id === previous.id)) return { pause }
+
+    log(`Re-uploading existing stall event to all ${relays.length} relays`)
+    return await throttledSendEvent(previous, relays, { pause, log, trailingPause: true })
+  }
 
   return await publishStall({
     kind,
@@ -611,7 +619,7 @@ async function maybeUploadStall ({
   })
 }
 
-async function getPreviousStall (dTagValue, writeRelays, signer, channel) {
+async function getPreviousStall (dTagValue, relays, signer, channel) {
   const kind = {
     main: 37348,
     next: 37349,
@@ -623,8 +631,15 @@ async function getPreviousStall (dTagValue, writeRelays, signer, channel) {
     authors: [await signer.getPublicKey()],
     '#d': [dTagValue],
     limit: 1
-  }, [...new Set([...writeRelays, ...nappRelays])])).result
+  }, relays)).result
 
   if (storedEvents.length === 0) return null
-  return storedEvents.sort((a, b) => b.created_at - a.created_at)[0]
+
+  storedEvents.sort((a, b) => b.created_at - a.created_at)
+
+  return {
+    previous: storedEvents[0],
+    storedEvents,
+    targetRelayCount: relays.length
+  }
 }
