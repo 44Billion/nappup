@@ -6,6 +6,7 @@ import NostrSigner from '#services/nostr-signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'
 import { isNostrAppDTagSafe, deriveNostrAppDTag } from '#helpers/app.js'
 import { extractHtmlMetadata, findFavicon, findIndexFile } from '#helpers/app-metadata.js'
+import { stringifyEvent } from '#helpers/event.js'
 import { NAPP_CATEGORIES } from '#config/napp-categories.js'
 
 export default async function (...args) {
@@ -222,7 +223,10 @@ async function throttledSendEvent (event, relays, {
       else r[1].push(v)
       return r
     }, [[], []])
-  log(`${unretryableErrors.length} Unretryable errors:\n${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
+  if (unretryableErrors.length > 0) {
+    log(`${unretryableErrors.length} unretryable errors:\n${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
+    console.log('Erroed event:', stringifyEvent(event))
+  }
   const unretryableErrorsLength = errors.length - rateLimitErrors.length
   const maybeSuccessfulRelays = relays.length - unretryableErrorsLength
   const hasReachedMaxRetries = retries > maxRetries
