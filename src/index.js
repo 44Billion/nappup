@@ -130,7 +130,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
     }
   }
 
-  log(`Uploading stall event for #${dTag}`)
+  log(`Uploading stall event for ${dTag}`)
   ;({ pause } = (await maybeUploadStall({
     dTag,
     channel,
@@ -178,7 +178,7 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
         continue
       }
       log(`${filename}: Re-uploading chunk ${++chunkIndex} of ${chunkLength} to ${missingRelays.length} missing relays (out of ${relays.length})`)
-      ;({ pause } = (await throttledSendEvent(foundEvent, missingRelays, { pause, log, trailingPause: true })))
+      ;({ pause } = (await throttledSendEvent(foundEvent, missingRelays, { pause, log, trailingPause: true, minSuccessfulRelays: 0 })))
       continue
     }
     const binaryDataChunk = {
@@ -354,7 +354,7 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
         // nostrRelays.getEvents currently doesn't tell us which event came from which relay,
         // so we re-upload to all relays to ensure consistency
         log(`Re-uploading existing bundle event to ${missingRelays.length} missing relays (out of ${writeRelays.length})`)
-        await throttledSendEvent(mostRecentEvent, missingRelays, { pause, trailingPause: true, log })
+        await throttledSendEvent(mostRecentEvent, missingRelays, { pause, trailingPause: true, log, minSuccessfulRelays: 0 })
         return mostRecentEvent
       }
     }
@@ -641,7 +641,7 @@ async function maybeUploadStall ({
     if (missingRelays.length === 0) return { pause }
 
     log(`Re-uploading existing stall event to ${missingRelays.length} missing relays (out of ${relays.length})`)
-    return await throttledSendEvent(previous, missingRelays, { pause, log, trailingPause: true })
+    return await throttledSendEvent(previous, missingRelays, { pause, log, trailingPause: true, minSuccessfulRelays: 0 })
   }
 
   return await publishStall({
