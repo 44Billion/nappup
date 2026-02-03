@@ -325,9 +325,15 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
       })
 
       const mostRecentEvent = events[0]
-      const recentFileTags = mostRecentEvent.tags.filter(t => t[0] === 'file')
+      const recentFileTags = mostRecentEvent.tags
+        .filter(t => t[0] === 'file' && t[2] !== '.well-known/napp.json')
+        .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
 
-      const isSame = fileTags.length === recentFileTags.length && fileTags.every((t, i) => {
+      const currentFileTags = fileTags
+        .filter(t => t[2] !== '.well-known/napp.json')
+        .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
+
+      const isSame = currentFileTags.length === recentFileTags.length && currentFileTags.every((t, i) => {
         const rt = recentFileTags[i]
         return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3]
       })
