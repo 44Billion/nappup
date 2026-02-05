@@ -146,6 +146,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
     writeRelays,
     log,
     pause,
+    shouldReupload,
     self: nappJson.self?.[0]?.[0],
     countries: nappJson.country,
     categories: nappJson.category,
@@ -386,6 +387,7 @@ async function maybeUploadStall ({
   writeRelays,
   log,
   pause,
+  shouldReupload,
   self,
   countries,
   categories,
@@ -631,7 +633,7 @@ async function maybeUploadStall ({
     }
   }
 
-  if (!changed) {
+  if (!changed && !shouldReupload) {
     const { storedEvents } = previousResult
 
     const matchingEvents = storedEvents.filter(e => e.id === previous.id)
