@@ -218,23 +218,38 @@ async function throttledSendEvent (event, relays, {
     return { pause }
   }
 
-  const [rateLimitErrors, unretryableErrors] =
+  const [rateLimitErrors, maybeUnretryableErrors, unretryableErrors] =
     errors.reduce((r, v) => {
-      if ((v.reason?.message ?? '').startsWith('rate-limited:')) r[0].push(v)
-      else r[1].push(v)
+      const message = v.reason?.message ?? ''
+      if (message.startsWith('rate-limited:')) r[0].push(v)
+      // https://github.com/nbd-wtf/nostr-tools/blob/28f7553187d201088c8a1009365db4ecbe03e568/abstract-relay.ts#L311
+      else if (message === 'publish timed out') r[1].push(v)
+      else r[2].push(v)
       return r
-    }, [[], []])
+    }, [[], [], []])
+
+  // One-time special retry
+  if (maybeUnretryableErrors.length > 0) {
+    const timedOutRelays = maybeUnretryableErrors.map(v => v.relay)
+    log(`${maybeUnretryableErrors.length} timeout errors, retrying once after ${pause}ms:\n${maybeUnretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
+    if (pause) await new Promise(resolve => setTimeout(resolve, pause))
+    const { errors: timeoutRetryErrors } = await nostrRelays.sendEvent(event, timedOutRelays, 15000)
+    unretryableErrors.push(...timeoutRetryErrors)
+  }
+
   if (unretryableErrors.length > 0) {
     log(`${unretryableErrors.length} unretryable errors:\n${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
     console.log('Erroed event:', stringifyEvent(event))
   }
-  const unretryableErrorsLength = errors.length - rateLimitErrors.length
-  const maybeSuccessfulRelays = relays.length - unretryableErrorsLength
+  const maybeSuccessfulRelays = relays.length - unretryableErrors.length
   const hasReachedMaxRetries = retries > maxRetries
   if (
     hasReachedMaxRetries ||
     maybeSuccessfulRelays < minSuccessfulRelays
-  ) throw new Error(errors.map(v => `\n${v.relay}: ${v.reason}`).join('\n'))
+  ) {
+    const finalErrors = [...rateLimitErrors, ...unretryableErrors]
+    throw new Error(finalErrors.map(v => `\n${v.relay}: ${v.reason}`).join('\n'))
+  }
 
   if (rateLimitErrors.length === 0) {
     if (pause && trailingPause) await new Promise(resolve => setTimeout(resolve, pause))
@@ -245,7 +260,8 @@ async function throttledSendEvent (event, relays, {
   log(`Rate limited by ${erroedRelays.length} relays, pausing for ${pause + 2000} ms`)
   await new Promise(resolve => setTimeout(resolve, (pause += 2000)))
 
-  minSuccessfulRelays = Math.max(0, minSuccessfulRelays - (relays.length - erroedRelays.length))
+  // Subtracts the successful publishes from the original minSuccessfulRelays goal
+  minSuccessfulRelays = Math.max(0, minSuccessfulRelays - (relays.length - erroedRelays.length - unretryableErrors.length))
   return await throttledSendEvent(event, erroedRelays, {
     pause, log, retries: ++retries, maxRetries, minSuccessfulRelays, leadingPause: false, trailingPause
   })
