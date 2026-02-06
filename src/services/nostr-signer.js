@@ -71,10 +71,13 @@ export default class NostrSigner {
     const relays = rTags.reduce((r, v) => {
       keys = [v[2]].filter(v2 => keyAllowList[v2])
       if (keys.length === 0) keys = ['read', 'write']
-      keys.forEach(k => r[k].push(v[1]))
+      keys.forEach(k => r[k].push(v[1].trim().replace(/\/$/, '')))
       return r
     }, { read: [], write: [] })
-    Object.values(relays).forEach(v => { v.length === 0 && v.push(...freeRelays) })
+    for (const k in relays) {
+      if (relays[k].length === 0) relays[k].push(...freeRelays)
+      relays[k] = [...new Set(relays[k])]
+    }
     return (this.relays = relays)
   }
 
@@ -91,7 +94,7 @@ export default class NostrSigner {
       content: '',
       created_at: Math.floor(Date.now() / 1000)
     })
-    await nostrRelays.sendEvent(relayList, [...new Set([...seedRelays, ...this.relays.write])])
+    await nostrRelays.sendEvent(relayList, [...new Set([...seedRelays, ...this.relays.write].map(r => r.trim().replace(/\/$/, '')))])
     return this.relays
   }
 

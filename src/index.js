@@ -23,7 +23,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
   if (typeof window !== 'undefined' && nostrSigner === window.nostr) {
     nostrSigner.getRelays = NostrSigner.prototype.getRelays
   }
-  const writeRelays = (await nostrSigner.getRelays()).write
+  const writeRelays = [...new Set((await nostrSigner.getRelays()).write.map(r => r.trim().replace(/\/$/, '')))]
   log(`Found ${writeRelays.length} outbox relays for pubkey ${nostrSigner.getPublicKey()}:\n${writeRelays.join(', ')}`)
   if (writeRelays.length === 0) throw new Error('No outbox relays found')
 
@@ -167,7 +167,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
 
 async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, log, pause = 0, mimeType, shouldReupload = false }) {
   const writeRelays = (await signer.getRelays()).write
-  const relays = [...new Set([...writeRelays, ...nappRelays])]
+  const relays = [...new Set([...writeRelays, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
   let chunkIndex = 0
   for await (const chunk of nmmr.getChunks()) {
     const dTag = chunk.x
@@ -274,7 +274,7 @@ async function throttledSendEvent (event, relays, {
 }
 
 async function getPreviousCtags (dTagValue, currentCtagValue, relays, signer) {
-  const targetRelays = [...new Set([...relays, ...nappRelays])]
+  const targetRelays = [...new Set([...relays, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
   const storedEvents = (await nostrRelays.getEvents({
     kinds: [34600],
     authors: [await signer.getPublicKey()],
@@ -333,7 +333,7 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
     ...fileTags
   ]
 
-  const writeRelays = [...new Set([...(await signer.getRelays()).write, ...nappRelays])]
+  const writeRelays = [...new Set([...(await signer.getRelays()).write, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
 
   let mostRecentEvent
   const events = (await nostrRelays.getEvents({
@@ -428,7 +428,7 @@ async function maybeUploadStall ({
   const hasMetadata = Boolean(trimmedName) || Boolean(trimmedSummary) || Boolean(iconRootHash) ||
     Boolean(self) || (countries && countries.length > 0) || (categories && categories.length > 0) || (hashtags && hashtags.length > 0)
 
-  const relays = [...new Set([...writeRelays, ...nappRelays])]
+  const relays = [...new Set([...writeRelays, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
 
   const previousResult = await getPreviousStall(dTag, relays, signer, channel)
   const previous = previousResult?.previous
