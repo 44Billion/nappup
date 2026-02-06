@@ -9,6 +9,20 @@ export function extractHtmlMetadata (htmlContent) {
       name = titleMatch[1].trim()
     }
 
+    if (!name) {
+      const ogTitleRegex = /<meta\s+[^>]*(?:property|name)\s*=\s*["']og:title["'][^>]*content\s*=\s*["']([^"']+)["'][^>]*>/i
+      const ogTitleMatch = htmlContent.match(ogTitleRegex)
+      if (ogTitleMatch && ogTitleMatch[1]) {
+        name = ogTitleMatch[1].trim()
+      } else {
+        const altOgTitleRegex = /<meta\s+[^>]*content\s*=\s*["']([^"']+)["'][^>]*(?:property|name)\s*=\s*["']og:title["'][^>]*>/i
+        const altOgTitleMatch = htmlContent.match(altOgTitleRegex)
+        if (altOgTitleMatch && altOgTitleMatch[1]) {
+          name = altOgTitleMatch[1].trim()
+        }
+      }
+    }
+
     const metaDescRegex = /<meta\s+[^>]*name\s*=\s*["']description["'][^>]*content\s*=\s*["']([^"']+)["'][^>]*>/i
     const metaDescMatch = htmlContent.match(metaDescRegex)
     if (metaDescMatch && metaDescMatch[1]) {
@@ -20,6 +34,20 @@ export function extractHtmlMetadata (htmlContent) {
       const altMetaDescMatch = htmlContent.match(altMetaDescRegex)
       if (altMetaDescMatch && altMetaDescMatch[1]) {
         description = altMetaDescMatch[1].trim()
+      }
+    }
+
+    if (!description) {
+      const ogDescRegex = /<meta\s+[^>]*(?:property|name)\s*=\s*["']og:description["'][^>]*content\s*=\s*["']([^"']+)["'][^>]*>/i
+      const ogDescMatch = htmlContent.match(ogDescRegex)
+      if (ogDescMatch && ogDescMatch[1]) {
+        description = ogDescMatch[1].trim()
+      } else {
+        const altOgDescRegex = /<meta\s+[^>]*content\s*=\s*["']([^"']+)["'][^>]*(?:property|name)\s*=\s*["']og:description["'][^>]*>/i
+        const altOgDescMatch = htmlContent.match(altOgDescRegex)
+        if (altOgDescMatch && altOgDescMatch[1]) {
+          description = altOgDescMatch[1].trim()
+        }
       }
     }
   } catch (_) {

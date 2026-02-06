@@ -35,6 +35,34 @@ describe('extractHtmlMetadata', () => {
     const { description } = extractHtmlMetadata(html)
     assert.strictEqual(description, 'Alt description')
   })
+
+  it('extracts og:title and og:description fallback', () => {
+    const html = `
+    <html>
+      <head>
+        <meta property="og:title" content="My OG App">
+        <meta property="og:description" content="This is my OG app">
+      </head>
+    </html>
+  `
+    const { name, description } = extractHtmlMetadata(html)
+    assert.strictEqual(name, 'My OG App')
+    assert.strictEqual(description, 'This is my OG app')
+  })
+
+  it('extracts og:title and og:description with name attribute fallback', () => {
+    const html = `
+    <html>
+      <head>
+        <meta name="og:title" content="My OG Name App">
+        <meta name="og:description" content="This is my OG Name app">
+      </head>
+    </html>
+  `
+    const { name, description } = extractHtmlMetadata(html)
+    assert.strictEqual(name, 'My OG Name App')
+    assert.strictEqual(description, 'This is my OG Name app')
+  })
 })
 
 describe('findFavicon', () => {

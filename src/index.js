@@ -182,6 +182,12 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
       ;({ pause } = (await throttledSendEvent(foundEvent, missingRelays, { pause, log, trailingPause: true, minSuccessfulRelays: 0 })))
       continue
     }
+
+    const createdAt = Math.floor(Date.now() / 1000)
+    let effectiveCreatedAt = (foundEvent && foundEvent.created_at >= createdAt) ? foundEvent.created_at + 1 : createdAt
+    const maxCreatedAt = createdAt + 172800 // 2 days ahead
+    if (effectiveCreatedAt > maxCreatedAt) effectiveCreatedAt = maxCreatedAt
+
     const binaryDataChunk = {
       kind: 34600,
       tags: [
@@ -192,7 +198,7 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
       ],
       // These chunks already have the expected size of 51000 bytes
       content: new Base93Encoder().update(chunk.contentBytes).getEncoded(),
-      created_at: Math.floor(Date.now() / 1000)
+      created_at: effectiveCreatedAt
     }
 
     const event = await signer.signEvent(binaryDataChunk)
@@ -329,59 +335,65 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
 
   const writeRelays = [...new Set([...(await signer.getRelays()).write, ...nappRelays])]
 
-  if (!shouldReupload) {
-    const events = (await nostrRelays.getEvents({
-      kinds: [kind],
-      authors: [await signer.getPublicKey()],
-      '#d': [dTag],
-      limit: 1
-    }, writeRelays)).result
+  let mostRecentEvent
+  const events = (await nostrRelays.getEvents({
+    kinds: [kind],
+    authors: [await signer.getPublicKey()],
+    '#d': [dTag],
+    limit: 1
+  }, writeRelays)).result
 
-    if (events.length > 0) {
-      events.sort((a, b) => {
-        if (b.created_at !== a.created_at) return b.created_at - a.created_at
-        if (a.id < b.id) return -1
-        if (a.id > b.id) return 1
-        return 0
-      })
+  if (events.length > 0) {
+    events.sort((a, b) => {
+      if (b.created_at !== a.created_at) return b.created_at - a.created_at
+      if (a.id < b.id) return -1
+      if (a.id > b.id) return 1
+      return 0
+    })
+    mostRecentEvent = events[0]
+  }
 
-      const mostRecentEvent = events[0]
-      const recentFileTags = mostRecentEvent.tags
-        .filter(t => t[0] === 'file' && t[2] !== '.well-known/napp.json')
-        .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
+  if (!shouldReupload && mostRecentEvent) {
+    const recentFileTags = mostRecentEvent.tags
+      .filter(t => t[0] === 'file' && t[2] !== '.well-known/napp.json')
+      .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
 
-      const currentFileTags = fileTags
-        .filter(t => t[2] !== '.well-known/napp.json')
-        .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
+    const currentFileTags = fileTags
+      .filter(t => t[2] !== '.well-known/napp.json')
+      .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
 
-      const isSame = currentFileTags.length === recentFileTags.length && currentFileTags.every((t, i) => {
-        const rt = recentFileTags[i]
-        return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3]
-      })
+    const isSame = currentFileTags.length === recentFileTags.length && currentFileTags.every((t, i) => {
+      const rt = recentFileTags[i]
+      return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3]
+    })
 
-      if (isSame) {
-        log(`Bundle based on ${fileTags.length} files is up-to-date (id: ${mostRecentEvent.id} - created_at: ${new Date(mostRecentEvent.created_at * 1000).toISOString()})`)
+    if (isSame) {
+      log(`Bundle based on ${fileTags.length} files is up-to-date (id: ${mostRecentEvent.id} - created_at: ${new Date(mostRecentEvent.created_at * 1000).toISOString()})`)
 
-        const matchingEvents = events.filter(e => e.id === mostRecentEvent.id)
-        const coveredRelays = new Set(matchingEvents.map(e => e.meta?.relay).filter(Boolean))
-        const missingRelays = writeRelays.filter(r => !coveredRelays.has(r))
+      const matchingEvents = events.filter(e => e.id === mostRecentEvent.id)
+      const coveredRelays = new Set(matchingEvents.map(e => e.meta?.relay).filter(Boolean))
+      const missingRelays = writeRelays.filter(r => !coveredRelays.has(r))
 
-        if (missingRelays.length === 0) return mostRecentEvent
+      if (missingRelays.length === 0) return mostRecentEvent
 
-        // nostrRelays.getEvents currently doesn't tell us which event came from which relay,
-        // so we re-upload to all relays to ensure consistency
-        log(`Re-uploading existing bundle event to ${missingRelays.length} missing relays (out of ${writeRelays.length})`)
-        await throttledSendEvent(mostRecentEvent, missingRelays, { pause, trailingPause: true, log, minSuccessfulRelays: 0 })
-        return mostRecentEvent
-      }
+      // nostrRelays.getEvents currently doesn't tell us which event came from which relay,
+      // so we re-upload to all relays to ensure consistency
+      log(`Re-uploading existing bundle event to ${missingRelays.length} missing relays (out of ${writeRelays.length})`)
+      await throttledSendEvent(mostRecentEvent, missingRelays, { pause, trailingPause: true, log, minSuccessfulRelays: 0 })
+      return mostRecentEvent
     }
   }
+
+  const createdAt = Math.floor(Date.now() / 1000)
+  let effectiveCreatedAt = (mostRecentEvent && mostRecentEvent.created_at >= createdAt) ? mostRecentEvent.created_at + 1 : createdAt
+  const maxCreatedAt = createdAt + 172800 // 2 days ahead
+  if (effectiveCreatedAt > maxCreatedAt) effectiveCreatedAt = maxCreatedAt
 
   const appBundle = {
     kind,
     tags,
     content: '',
-    created_at: Math.floor(Date.now() / 1000)
+    created_at: effectiveCreatedAt
   }
   const event = await signer.signEvent(appBundle)
   await throttledSendEvent(event, writeRelays, { pause, trailingPause: true, log })
@@ -420,7 +432,10 @@ async function maybeUploadStall ({
 
   const previousResult = await getPreviousStall(dTag, relays, signer, channel)
   const previous = previousResult?.previous
-  if (!previous && !hasMetadata) return { pause }
+  if (!previous && !hasMetadata) {
+    if (shouldReupload) log('Skipping stall event upload: No previous event found and no metadata provided.')
+    return { pause }
+  }
 
   const publishStall = async (event) => {
     const signedEvent = await signer.signEvent(event)
@@ -495,7 +510,10 @@ async function maybeUploadStall ({
       if (isSummaryAuto) tags.push(['auto', 'summary'])
     }
 
-    if (!hasIcon || !hasName) return { pause }
+    if (!hasIcon || !hasName) {
+      log(`Skipping stall event creation: Missing required metadata.${!hasName ? ' Name is missing.' : ''}${!hasIcon ? ' Icon is missing.' : ''}`)
+      return { pause }
+    }
 
     return await publishStall({
       kind,
@@ -662,11 +680,15 @@ async function maybeUploadStall ({
     return await throttledSendEvent(previous, missingRelays, { pause, log, trailingPause: true, minSuccessfulRelays: 0 })
   }
 
+  let effectiveCreatedAt = (previous && previous.created_at >= createdAt) ? previous.created_at + 1 : createdAt
+  const maxCreatedAt = createdAt + 172800 // 2 days ahead
+  if (effectiveCreatedAt > maxCreatedAt) effectiveCreatedAt = maxCreatedAt
+
   return await publishStall({
     kind,
     tags,
     content: typeof previous.content === 'string' ? previous.content : '',
-    created_at: createdAt
+    created_at: effectiveCreatedAt
   })
 }
 
