@@ -166,14 +166,46 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
 }
 
 async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, log, pause = 0, mimeType, shouldReupload = false }) {
+  const pubkey = await signer.getPublicKey()
   const writeRelays = (await signer.getRelays()).write
   const relays = [...new Set([...writeRelays, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
+
+  // Find max stored created_at for this file's chunks
+  const rootHash = nmmr.getRoot()
+  const allCTags = Array.from({ length: chunkLength }, (_, i) => `${rootHash}:${i}`)
+  let maxStoredCreatedAt = 0
+
+  for (let i = 0; i < allCTags.length; i += 100) {
+    const batch = allCTags.slice(i, i + 100)
+    const storedEvents = (await nostrRelays.getEvents({
+      kinds: [34600],
+      authors: [pubkey],
+      '#c': batch,
+      limit: 1
+    }, relays)).result
+
+    if (storedEvents.length > 0) {
+      const batchMaxCreatedAt = storedEvents.reduce((m, e) => Math.max(m, (e && typeof e.created_at === 'number') ? e.created_at : 0), 0)
+      if (batchMaxCreatedAt > maxStoredCreatedAt) maxStoredCreatedAt = batchMaxCreatedAt
+    }
+  }
+
+  // Set initial created_at based on what's higher, maxStoredCreatedAt or current time
+  let createdAtCursor = (Math.max(maxStoredCreatedAt, Math.floor(Date.now() / 1000)) + chunkLength)
+
   let chunkIndex = 0
   for await (const chunk of nmmr.getChunks()) {
     const dTag = chunk.x
     const currentCtag = `${chunk.rootX}:${chunk.index}`
     const { otherCtags, hasCurrentCtag, foundEvent, missingRelays } = await getPreviousCtags(dTag, currentCtag, relays, signer)
     if (!shouldReupload && hasCurrentCtag) {
+      // Handling of partial uploads/resumes:
+      // If we are observing an existing chunk, we use its created_at to re-align our cursor
+      // for the next chunks (so next chunk will be this_chunk_time - 1)
+      if (foundEvent) {
+        createdAtCursor = foundEvent.created_at - 1
+      }
+
       if (missingRelays.length === 0) {
         log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
         continue
@@ -183,10 +215,10 @@ async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, lo
       continue
     }
 
-    const createdAt = Math.floor(Date.now() / 1000)
-    let effectiveCreatedAt = (foundEvent && foundEvent.created_at >= createdAt) ? foundEvent.created_at + 1 : createdAt
-    const maxCreatedAt = createdAt + 172800 // 2 days ahead
-    if (effectiveCreatedAt > maxCreatedAt) effectiveCreatedAt = maxCreatedAt
+    const effectiveCreatedAt = createdAtCursor
+    // The lower chunk index, the higher created_at must be
+    // for relays to serve chunks in the most efficient order
+    createdAtCursor--
 
     const binaryDataChunk = {
       kind: 34600,
