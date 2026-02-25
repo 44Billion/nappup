@@ -1,13 +1,13 @@
 import NMMR from 'nmmr'
 import { appEncode } from '#helpers/nip19.js'
-import Base93Encoder from '#services/base93-encoder.js'
 import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
 import NostrSigner from '#services/nostr-signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'
 import { isNostrAppDTagSafe, deriveNostrAppDTag } from '#helpers/app.js'
 import { extractHtmlMetadata, findFavicon, findIndexFile } from '#helpers/app-metadata.js'
-import { stringifyEvent } from '#helpers/event.js'
 import { NAPP_CATEGORIES } from '#config/napp-categories.js'
+import { getBlossomServers, healthCheckServers, uploadFilesToBlossom } from '#services/blossom-upload.js'
+import { uploadBinaryDataChunks, throttledSendEvent } from '#services/irfs-upload.js'
 
 export default async function (...args) {
   try {
@@ -68,6 +68,20 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
 
   let pause = 1000
 
+  // Check for blossom servers
+  log('Checking for blossom servers...')
+  const blossomServerUrls = await getBlossomServers(nostrSigner, writeRelays)
+  let healthyBlossomServers = []
+  if (blossomServerUrls.length > 0) {
+    log(`Found ${blossomServerUrls.length} blossom servers: ${blossomServerUrls.join(', ')}`)
+    healthyBlossomServers = await healthCheckServers(blossomServerUrls, nostrSigner, { log })
+    log(`${healthyBlossomServers.length} of ${blossomServerUrls.length} blossom servers are healthy`)
+  } else {
+    log('No blossom servers configured, will use relay-based file upload (irfs)')
+  }
+
+  const useBlossom = healthyBlossomServers.length > 0
+
   // Upload icon from napp.json if present
   if (nappJson.stallIcon?.[0]?.[0]) {
     try {
@@ -80,19 +94,41 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
 
       log('Uploading icon from napp.json')
 
-      nmmr = new NMMR()
-      const stream = blob.stream()
-      let chunkLength = 0
-      for await (const chunk of streamToChunks(stream, 51000)) {
-        chunkLength++
-        await nmmr.append(chunk)
+      if (useBlossom) {
+        const { uploadedFiles, failedFiles } = await uploadFilesToBlossom({
+          fileList: [Object.assign(blob, { webkitRelativePath: `_/${filename}` })],
+          servers: healthyBlossomServers,
+          signer: nostrSigner,
+          shouldReupload,
+          log
+        })
+        if (uploadedFiles.length > 0) {
+          iconMetadata = {
+            rootHash: uploadedFiles[0].sha256,
+            mimeType,
+            service: 'blossom'
+          }
+        } else if (failedFiles.length > 0) {
+          log('Blossom icon upload failed, falling back to relay upload')
+        }
       }
 
-      if (chunkLength) {
-        ;({ pause } = (await uploadBinaryDataChunks({ nmmr, signer: nostrSigner, filename, chunkLength, log, pause, mimeType, shouldReupload })))
-        iconMetadata = {
-          rootHash: nmmr.getRoot(),
-          mimeType
+      if (!iconMetadata) {
+        nmmr = new NMMR()
+        const stream = blob.stream()
+        let chunkLength = 0
+        for await (const chunk of streamToChunks(stream, 51000)) {
+          chunkLength++
+          await nmmr.append(chunk)
+        }
+
+        if (chunkLength) {
+          ;({ pause } = (await uploadBinaryDataChunks({ nmmr, signer: nostrSigner, filename, chunkLength, log, pause, mimeType, shouldReupload })))
+          iconMetadata = {
+            rootHash: nmmr.getRoot(),
+            mimeType,
+            service: 'irfs'
+          }
         }
       }
     } catch (e) {
@@ -101,7 +137,45 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
   }
 
   log(`Processing ${fileList.length} files`)
-  for (const file of fileList) {
+
+  // Files to upload via relay (irfs) — either all files or blossom failures
+  let irfsFileList = fileList
+
+  if (useBlossom) {
+    const { uploadedFiles, failedFiles } = await uploadFilesToBlossom({
+      fileList,
+      servers: healthyBlossomServers,
+      signer: nostrSigner,
+      shouldReupload,
+      log
+    })
+
+    for (const uploaded of uploadedFiles) {
+      fileMetadata.push({
+        rootHash: uploaded.sha256,
+        filename: uploaded.filename,
+        mimeType: uploaded.mimeType,
+        service: 'blossom'
+      })
+
+      if (faviconFile && uploaded.file === faviconFile) {
+        iconMetadata = {
+          rootHash: uploaded.sha256,
+          mimeType: uploaded.mimeType,
+          service: 'blossom'
+        }
+      }
+    }
+
+    if (failedFiles.length > 0) {
+      log(`${failedFiles.length} files failed blossom upload, falling back to relay upload (irfs)`)
+      irfsFileList = failedFiles.map(f => f.file)
+    } else {
+      irfsFileList = []
+    }
+  }
+
+  for (const file of irfsFileList) {
     nmmr = new NMMR()
     const stream = file.stream()
 
@@ -118,13 +192,15 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
       fileMetadata.push({
         rootHash: nmmr.getRoot(),
         filename,
-        mimeType: file.type || 'application/octet-stream'
+        mimeType: file.type || 'application/octet-stream',
+        service: 'irfs'
       })
 
       if (faviconFile && file === faviconFile) {
         iconMetadata = {
           rootHash: nmmr.getRoot(),
-          mimeType: file.type || 'application/octet-stream'
+          mimeType: file.type || 'application/octet-stream',
+          service: 'irfs'
         }
       }
     }
@@ -165,193 +241,6 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
   log(`Visit at https://44billion.net/${appEntity}`)
 }
 
-async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, log, pause = 0, mimeType, shouldReupload = false }) {
-  const pubkey = await signer.getPublicKey()
-  const writeRelays = (await signer.getRelays()).write
-  const relays = [...new Set([...writeRelays, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
-
-  // Find max stored created_at for this file's chunks
-  const rootHash = nmmr.getRoot()
-  const allCTags = Array.from({ length: chunkLength }, (_, i) => `${rootHash}:${i}`)
-  let maxStoredCreatedAt = 0
-
-  for (let i = 0; i < allCTags.length; i += 100) {
-    const batch = allCTags.slice(i, i + 100)
-    const storedEvents = (await nostrRelays.getEvents({
-      kinds: [34600],
-      authors: [pubkey],
-      '#c': batch,
-      limit: 1
-    }, relays)).result
-
-    if (storedEvents.length > 0) {
-      const batchMaxCreatedAt = storedEvents.reduce((m, e) => Math.max(m, (e && typeof e.created_at === 'number') ? e.created_at : 0), 0)
-      if (batchMaxCreatedAt > maxStoredCreatedAt) maxStoredCreatedAt = batchMaxCreatedAt
-    }
-  }
-
-  // Set initial created_at based on what's higher, maxStoredCreatedAt or current time
-  let createdAtCursor = (Math.max(maxStoredCreatedAt, Math.floor(Date.now() / 1000)) + chunkLength)
-
-  let chunkIndex = 0
-  for await (const chunk of nmmr.getChunks()) {
-    const dTag = chunk.x
-    const currentCtag = `${chunk.rootX}:${chunk.index}`
-    const { otherCtags, hasCurrentCtag, foundEvent, missingRelays } = await getPreviousCtags(dTag, currentCtag, relays, signer)
-    if (!shouldReupload && hasCurrentCtag) {
-      // Handling of partial uploads/resumes:
-      // If we are observing an existing chunk, we use its created_at to re-align our cursor
-      // for the next chunks (so next chunk will be this_chunk_time - 1)
-      if (foundEvent) {
-        createdAtCursor = foundEvent.created_at - 1
-      }
-
-      if (missingRelays.length === 0) {
-        log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
-        continue
-      }
-      log(`${filename}: Re-uploading chunk ${++chunkIndex} of ${chunkLength} to ${missingRelays.length} missing relays (out of ${relays.length})`)
-      ;({ pause } = (await throttledSendEvent(foundEvent, missingRelays, { pause, log, trailingPause: true, minSuccessfulRelays: 0 })))
-      continue
-    }
-
-    const effectiveCreatedAt = createdAtCursor
-    // The lower chunk index, the higher created_at must be
-    // for relays to serve chunks in the most efficient order
-    createdAtCursor--
-
-    const binaryDataChunk = {
-      kind: 34600,
-      tags: [
-        ['d', dTag],
-        ...otherCtags,
-        ['c', currentCtag, chunk.length, ...chunk.proof],
-        ...(mimeType ? [['m', mimeType]] : [])
-      ],
-      // These chunks already have the expected size of 51000 bytes
-      content: new Base93Encoder().update(chunk.contentBytes).getEncoded(),
-      created_at: effectiveCreatedAt
-    }
-
-    const event = await signer.signEvent(binaryDataChunk)
-    const fallbackRelayCount = relays.length - writeRelays.length
-    log(`${filename}: Uploading file part ${++chunkIndex} of ${chunkLength} to ${writeRelays.length} relays${fallbackRelayCount > 0 ? ` (+${fallbackRelayCount} fallback)` : ''}`)
-    ;({ pause } = (await throttledSendEvent(event, relays, { pause, log, trailingPause: true })))
-  }
-  return { pause }
-}
-
-async function throttledSendEvent (event, relays, {
-  pause, log,
-  retries = 0, maxRetries = 10,
-  minSuccessfulRelays = 1,
-  leadingPause = false, trailingPause = false
-}) {
-  if (pause && leadingPause) await new Promise(resolve => setTimeout(resolve, pause))
-  if (retries > 0) log(`Retrying upload to ${relays.length} relays: ${relays.join(', ')}`)
-
-  const { errors } = (await nostrRelays.sendEvent(event, relays, 15000))
-  if (errors.length === 0) {
-    if (pause && trailingPause) await new Promise(resolve => setTimeout(resolve, pause))
-    return { pause }
-  }
-
-  const [rateLimitErrors, maybeUnretryableErrors, unretryableErrors] =
-    errors.reduce((r, v) => {
-      const message = v.reason?.message ?? ''
-      if (message.startsWith('rate-limited:')) r[0].push(v)
-      // https://github.com/nbd-wtf/nostr-tools/blob/28f7553187d201088c8a1009365db4ecbe03e568/abstract-relay.ts#L311
-      else if (message === 'publish timed out') r[1].push(v)
-      else r[2].push(v)
-      return r
-    }, [[], [], []])
-
-  // One-time special retry
-  if (maybeUnretryableErrors.length > 0) {
-    const timedOutRelays = maybeUnretryableErrors.map(v => v.relay)
-    log(`${maybeUnretryableErrors.length} timeout errors, retrying once after ${pause}ms:\n${maybeUnretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
-    if (pause) await new Promise(resolve => setTimeout(resolve, pause))
-    const { errors: timeoutRetryErrors } = await nostrRelays.sendEvent(event, timedOutRelays, 15000)
-    unretryableErrors.push(...timeoutRetryErrors)
-  }
-
-  if (unretryableErrors.length > 0) {
-    log(`${unretryableErrors.length} unretryable errors:\n${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
-    console.log('Erroed event:', stringifyEvent(event))
-  }
-  const maybeSuccessfulRelays = relays.length - unretryableErrors.length
-  const hasReachedMaxRetries = retries > maxRetries
-  if (
-    hasReachedMaxRetries ||
-    maybeSuccessfulRelays < minSuccessfulRelays
-  ) {
-    const finalErrors = [...rateLimitErrors, ...unretryableErrors]
-    throw new Error(finalErrors.map(v => `\n${v.relay}: ${v.reason}`).join('\n'))
-  }
-
-  if (rateLimitErrors.length === 0) {
-    if (pause && trailingPause) await new Promise(resolve => setTimeout(resolve, pause))
-    return { pause }
-  }
-
-  const erroedRelays = rateLimitErrors.map(v => v.relay)
-  log(`Rate limited by ${erroedRelays.length} relays, pausing for ${pause + 2000} ms`)
-  await new Promise(resolve => setTimeout(resolve, (pause += 2000)))
-
-  // Subtracts the successful publishes from the original minSuccessfulRelays goal
-  minSuccessfulRelays = Math.max(0, minSuccessfulRelays - (relays.length - erroedRelays.length - unretryableErrors.length))
-  return await throttledSendEvent(event, erroedRelays, {
-    pause, log, retries: ++retries, maxRetries, minSuccessfulRelays, leadingPause: false, trailingPause
-  })
-}
-
-async function getPreviousCtags (dTagValue, currentCtagValue, relays, signer) {
-  const targetRelays = [...new Set([...relays, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
-  const storedEvents = (await nostrRelays.getEvents({
-    kinds: [34600],
-    authors: [await signer.getPublicKey()],
-    '#d': [dTagValue],
-    limit: 1
-  }, targetRelays)).result
-
-  let hasCurrentCtag = false
-  const hasEvent = storedEvents.length > 0
-  if (!hasEvent) return { otherCtags: [], hasEvent, hasCurrentCtag }
-
-  const cTagValues = { [currentCtagValue]: true }
-  storedEvents.sort((a, b) => b.created_at - a.created_at)
-  const bestEvent = storedEvents[0]
-  const prevTags = bestEvent.tags
-
-  if (!Array.isArray(prevTags)) return { otherCtags: [], hasEvent, hasCurrentCtag }
-
-  hasCurrentCtag = prevTags.some(tag =>
-    Array.isArray(tag) &&
-    tag[0] === 'c' &&
-    tag[1] === currentCtagValue
-  )
-
-  const otherCtags = prevTags
-    .filter(v => {
-      const isCTag =
-        Array.isArray(v) &&
-        v[0] === 'c' &&
-        typeof v[1] === 'string' &&
-        /^[0-9a-f]{64}:\d+$/.test(v[1])
-      if (!isCTag) return false
-
-      const isntDuplicate = !cTagValues[v[1]]
-      cTagValues[v[1]] = true
-      return isCTag && isntDuplicate
-    })
-
-  const matchingEvents = storedEvents.filter(e => e.id === bestEvent.id)
-  const coveredRelays = new Set(matchingEvents.map(e => e.meta?.relay).filter(Boolean))
-  const missingRelays = targetRelays.filter(r => !coveredRelays.has(r))
-
-  return { otherCtags, hasEvent, hasCurrentCtag, foundEvent: bestEvent, missingRelays }
-}
-
 async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, shouldReupload = false, log = () => {} }) {
   const kind = {
     main: 37448, // stable
@@ -359,7 +248,7 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
     draft: 37450 // vibe coded preview
   }[channel] ?? 37448
 
-  const fileTags = fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType])
+  const fileTags = fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType, v.service || 'irfs'])
   const tags = [
     ['d', dTag],
     ...fileTags
@@ -396,7 +285,7 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
 
     const isSame = currentFileTags.length === recentFileTags.length && currentFileTags.every((t, i) => {
       const rt = recentFileTags[i]
-      return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3]
+      return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3] && (rt[4] || 'irfs') === (t[4] || 'irfs')
     })
 
     if (isSame) {
@@ -457,6 +346,7 @@ async function maybeUploadStall ({
   const trimmedSummary = typeof summary === 'string' ? summary.trim() : ''
   const iconRootHash = icon?.rootHash
   const iconMimeType = icon?.mimeType
+  const iconService = icon?.service || 'irfs'
   const hasMetadata = Boolean(trimmedName) || Boolean(trimmedSummary) || Boolean(iconRootHash) ||
     Boolean(self) || (countries && countries.length > 0) || (categories && categories.length > 0) || (hashtags && hashtags.length > 0)
 
@@ -523,7 +413,7 @@ async function maybeUploadStall ({
     let hasName = false
     if (iconRootHash && iconMimeType) {
       hasIcon = true
-      tags.push(['icon', iconRootHash, iconMimeType])
+      tags.push(['icon', iconRootHash, iconMimeType, iconService])
       if (isIconAuto) tags.push(['auto', 'icon'])
     }
 
@@ -693,7 +583,7 @@ async function maybeUploadStall ({
   if (iconRootHash && iconMimeType) {
     if (!isIconAuto || hasAuto('icon')) {
       ensureTagValue('icon', (_) => {
-        return ['icon', iconRootHash, iconMimeType]
+        return ['icon', iconRootHash, iconMimeType, iconService]
       })
       if (!isIconAuto) removeAuto('icon')
     }
