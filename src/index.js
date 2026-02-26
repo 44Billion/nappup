@@ -106,7 +106,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
           iconMetadata = {
             rootHash: uploadedFiles[0].sha256,
             mimeType,
-            service: 'blossom'
+            service: 'b' // blossom
           }
         } else if (failedFiles.length > 0) {
           log('Blossom icon upload failed, falling back to relay upload')
@@ -127,7 +127,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
           iconMetadata = {
             rootHash: nmmr.getRoot(),
             mimeType,
-            service: 'irfs'
+            service: 'i' // relay (irfs)
           }
         }
       }
@@ -155,14 +155,14 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
         rootHash: uploaded.sha256,
         filename: uploaded.filename,
         mimeType: uploaded.mimeType,
-        service: 'blossom'
+        service: 'b'
       })
 
       if (faviconFile && uploaded.file === faviconFile) {
         iconMetadata = {
           rootHash: uploaded.sha256,
           mimeType: uploaded.mimeType,
-          service: 'blossom'
+          service: 'b'
         }
       }
     }
@@ -193,14 +193,14 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
         rootHash: nmmr.getRoot(),
         filename,
         mimeType: file.type || 'application/octet-stream',
-        service: 'irfs'
+        service: 'i'
       })
 
       if (faviconFile && file === faviconFile) {
         iconMetadata = {
           rootHash: nmmr.getRoot(),
           mimeType: file.type || 'application/octet-stream',
-          service: 'irfs'
+          service: 'i'
         }
       }
     }
@@ -248,7 +248,7 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
     draft: 37450 // vibe coded preview
   }[channel] ?? 37448
 
-  const fileTags = fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType, v.service || 'irfs'])
+  const fileTags = fileMetadata.map(v => ['file', v.rootHash, v.filename, v.mimeType, v.service || 'i'])
   const tags = [
     ['d', dTag],
     ...fileTags
@@ -285,7 +285,7 @@ async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, s
 
     const isSame = currentFileTags.length === recentFileTags.length && currentFileTags.every((t, i) => {
       const rt = recentFileTags[i]
-      return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3] && (rt[4] || 'irfs') === (t[4] || 'irfs')
+      return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3] && (rt[4] || 'i') === (t[4] || 'i')
     })
 
     if (isSame) {
@@ -346,7 +346,7 @@ async function maybeUploadStall ({
   const trimmedSummary = typeof summary === 'string' ? summary.trim() : ''
   const iconRootHash = icon?.rootHash
   const iconMimeType = icon?.mimeType
-  const iconService = icon?.service || 'irfs'
+  const iconService = icon?.service || 'i'
   const hasMetadata = Boolean(trimmedName) || Boolean(trimmedSummary) || Boolean(iconRootHash) ||
     Boolean(self) || (countries && countries.length > 0) || (categories && categories.length > 0) || (hashtags && hashtags.length > 0)
 
