@@ -49,6 +49,12 @@ async function setupMocks (t) {
     errors: []
   }))
 
+  // Make setTimeout resolve immediately to skip the 1000ms trailing pauses
+  // inside throttledSendEvent (caused by the hardcoded `pause = 1000` in toApp)
+  const origSetTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn, _ms, ...args) => origSetTimeout(fn, 0, ...args)
+  t.after(() => { globalThis.setTimeout = origSetTimeout })
+
   return { nostrRelays }
 }
 
@@ -185,7 +191,7 @@ describe('onEvent', () => {
     assert.equal(events[events.length - 1].type, 'complete', 'complete should be the last event')
   })
 
-  it('should not emit complete when toApp throws', async (t) => {
+  it('should not emit complete when toApp throws', async () => {
     const events = []
     await assert.rejects(
       () => toApp([], null, { onEvent: (e) => events.push(e) }),
