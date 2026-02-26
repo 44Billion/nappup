@@ -9,15 +9,66 @@ import { NAPP_CATEGORIES } from '#config/napp-categories.js'
 import { getBlossomServers, healthCheckServers, uploadFilesToBlossom } from '#services/blossom-upload.js'
 import { uploadBinaryDataChunks, throttledSendEvent } from '#services/irfs-upload.js'
 
-export default async function (...args) {
+// TL;DR
+// import publishApp from 'nappup'
+// await publishApp(
+//   fileList,
+//   window.nostr,
+//   { dTagRaw: 'My app identifier unique to this nsec', onEvent: ({ progress }) => console.log(progress) }
+// )
+//
+// Simple usage -> onEvent: ({ progress, error }) => { if (error) { throw error } else { progressBar.style.width = `${progress}%` } }
+// Geek usage ->
+// onEvent: (event) => {
+//   if (event.type === 'file-uploaded') console.log(`Uploaded ${event.filename} via ${event.service}`)
+//   if (event.type === 'complete') console.log(`Done! Access at https://44billion.net/${event.naddr}`)
+//   if (event.type === 'error') console.error('Error during publishing:', event.error)
+// }
+//
+export default async function (fileList, nostrSigner, opts = {}) {
+  const onEvent = typeof opts.onEvent === 'function' ? opts.onEvent : null
+  let lastProgress = 0
   try {
-    return await toApp(...args)
+    return await toApp(fileList, nostrSigner, onEvent
+      ? {
+          ...opts,
+          onEvent (event) {
+            lastProgress = event.progress ?? lastProgress
+            onEvent(event)
+          }
+        }
+      : opts)
+  } catch (err) {
+    if (onEvent) try { onEvent({ type: 'error', error: err, progress: lastProgress }) } catch (_) {}
+    throw err
   } finally {
     await nostrRelays.disconnectAll()
   }
 }
 
-export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTagRaw, channel = 'main', shouldReupload = false } = {}) {
+/**
+ * Publishes an app to Nostr relays and/or blossom servers.
+ *
+ * The optional `onEvent` callback receives structured progress events.
+ * Every event has `type` (string) and `progress` (0–100 integer).
+ *
+ * Event types:
+ *   'init'             — { totalFiles, totalSteps, dTag, relayCount, blossomCount }
+ *   'icon-uploaded'    — { service: 'blossom'|'irfs'|null }
+ *   'file-uploaded'    — { filename, service: 'blossom'|'irfs' }
+ *   'stall-published'  — listing metadata published
+ *   'bundle-published' — app bundle published
+ *   'complete'         — { napp } (terminal, progress === 100)
+ *   'error'            — { error } (terminal, error is rethrown)
+ *
+ * Terminal events ('complete' or 'error') signal that no more events will follow.
+ * The 'error' event is only emitted when using the default export wrapper.
+ * Direct `toApp` callers receive the thrown error via normal async/await.
+ */
+export async function toApp (fileList, nostrSigner, { log = () => {}, onEvent = () => {}, dTag, dTagRaw, channel = 'main', shouldReupload = false } = {}) {
+  let _steps = 0
+  let _totalSteps = 1
+  const emit = (event) => { try { onEvent({ ...event, progress: event.type === 'complete' ? 100 : Math.round((_steps / _totalSteps) * 100) }) } catch (_) {} }
   if (!nostrSigner && typeof window !== 'undefined') nostrSigner = window.nostr
   if (!nostrSigner) throw new Error('No Nostr signer found')
   if (typeof window !== 'undefined' && nostrSigner === window.nostr) {
@@ -82,6 +133,10 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
 
   const useBlossom = healthyBlossomServers.length > 0
 
+  const hasIconUpload = Boolean(nappJson.stallIcon?.[0]?.[0])
+  _totalSteps = fileList.length + (hasIconUpload ? 1 : 0) + 2
+  emit({ type: 'init', totalFiles: fileList.length, totalSteps: _totalSteps, dTag, relayCount: writeRelays.length, blossomCount: healthyBlossomServers.length })
+
   // Upload icon from napp.json if present
   if (nappJson.stallIcon?.[0]?.[0]) {
     try {
@@ -136,6 +191,11 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
     }
   }
 
+  if (hasIconUpload) {
+    _steps++
+    emit({ type: 'icon-uploaded', service: iconMetadata?.service === 'b' ? 'blossom' : iconMetadata ? 'irfs' : null })
+  }
+
   log(`Processing ${fileList.length} files`)
 
   // Files to upload via relay (irfs) — either all files or blossom failures
@@ -165,6 +225,9 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
           service: 'b'
         }
       }
+
+      _steps++
+      emit({ type: 'file-uploaded', filename: uploaded.filename, service: 'blossom' })
     }
 
     if (failedFiles.length > 0) {
@@ -203,6 +266,9 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
           service: 'i'
         }
       }
+
+      _steps++
+      emit({ type: 'file-uploaded', filename, service: 'irfs' })
     }
   }
 
@@ -228,6 +294,8 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
     categories: nappJson.category,
     hashtags: nappJson.hashtag
   })))
+  _steps++
+  emit({ type: 'stall-published' })
 
   log(`Uploading bundle ${dTag}`)
   const bundle = await uploadBundle({ dTag, channel, fileMetadata, signer: nostrSigner, pause, shouldReupload, log })
@@ -238,7 +306,11 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, dTag, dTag
     relays: [],
     kind: bundle.kind
   })
+  _steps++
+  emit({ type: 'bundle-published' })
+
   log(`Visit at https://44billion.net/${appEntity}`)
+  emit({ type: 'complete', napp: appEntity })
 }
 
 async function uploadBundle ({ dTag, channel, fileMetadata, signer, pause = 0, shouldReupload = false, log = () => {} }) {
