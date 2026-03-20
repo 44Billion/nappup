@@ -2,18 +2,17 @@ import { Relay } from 'nostr-tools/relay'
 import { maybeUnref } from '#helpers/timer.js'
 
 export const seedRelays = [
+  'wss://relay.44billion.net',
   'wss://purplepag.es',
   'wss://user.kindpag.es',
   'wss://relay.nos.social',
-  'wss://relay.nostr.band',
   'wss://nostr.land',
   'wss://indexer.coracle.social'
 ]
 export const freeRelays = [
   'wss://relay.primal.net',
   'wss://nos.lol',
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band'
+  'wss://relay.damus.io'
 ]
 export const nappRelays = [
   'wss://relay.44billion.net'
