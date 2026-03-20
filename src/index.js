@@ -1,7 +1,7 @@
 import NMMR from 'nmmr'
 import { appEncode } from '#helpers/nip19.js'
 import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
-import NostrSigner from '#services/nostr-signer.js'
+import { getRelays } from '#helpers/signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'
 import { isNostrAppDTagSafe, deriveNostrAppDTag } from '#helpers/app.js'
 import { extractHtmlMetadata, findFavicon, findIndexFile } from '#helpers/app-metadata.js'
@@ -72,7 +72,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, onEvent = 
   if (!nostrSigner && typeof window !== 'undefined') nostrSigner = window.nostr
   if (!nostrSigner) throw new Error('No Nostr signer found')
   if (typeof window !== 'undefined' && nostrSigner === window.nostr) {
-    nostrSigner.getRelays = NostrSigner.prototype.getRelays
+    nostrSigner.getRelays = getRelays
   }
   const writeRelays = [...new Set((await nostrSigner.getRelays()).write.map(r => r.trim().replace(/\/$/, '')))]
   log(`Found ${writeRelays.length} outbox relays for pubkey ${nostrSigner.getPublicKey()}:\n${writeRelays.join(', ')}`)

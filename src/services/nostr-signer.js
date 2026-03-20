@@ -5,6 +5,7 @@ import * as dotenv from 'dotenv'
 import { getPublicKey } from 'nostr-tools/pure'
 import { getConversationKey, encrypt, decrypt } from 'nostr-tools/nip44'
 import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
+import { getRelays } from '#helpers/signer.js'
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
 import { finalizeEvent } from '#helpers/nip01.js'
 import { nsecDecode, nsecEncode } from '#helpers/nip19.js'
@@ -59,50 +60,24 @@ export default class NostrSigner {
   }
 
   async getRelays () {
-    if (this.relays) return this.relays
-
-    const relayLists = (await nostrRelays.getEvents({ authors: [await this.getPublicKey()], kinds: [10002], limit: 1 }, seedRelays)).result
-    const relayList = relayLists.sort((a, b) => b.created_at - a.created_at)[0]
-    const rTags = (relayList?.tags ?? []).filter(v => v[0] === 'r' && /^wss?:\/\//.test(v[1]))
-    if (rTags.length === 0) return (this.relays = await this.#initRelays())
-
-    let keys
-    const keyAllowList = { read: true, write: true }
-    const relays = rTags.reduce((r, v) => {
-      keys = [v[2]].filter(v2 => keyAllowList[v2])
-      if (keys.length === 0) keys = ['read', 'write']
-      keys.forEach(k => r[k].push(v[1].trim().replace(/\/$/, '')))
-      return r
-    }, { read: [], write: [] })
-    for (const k in relays) {
-      if (relays[k].length === 0) relays[k].push(...freeRelays)
-      relays[k] = [...new Set(relays[k])]
-    }
-    return (this.relays = relays)
+    return getRelays.call(this)
   }
 
-  async #initRelays () {
+  async #initSk () {
     const relays = freeRelays.slice(0, 2)
-    this.relays = {
-      read: relays,
-      write: relays
-    }
+    this.relays = { read: relays, write: relays }
     const relayList = await this.signEvent({
       kind: 10002,
-      pubkey: await this.getPublicKey(),
+      pubkey: this.getPublicKey(),
       tags: relays.map(v => ['r', v]),
       content: '',
       created_at: Math.floor(Date.now() / 1000)
     })
-    await nostrRelays.sendEvent(relayList, [...new Set([...seedRelays, ...this.relays.write].map(r => r.trim().replace(/\/$/, '')))])
-    return this.relays
-  }
+    await nostrRelays.sendEvent(relayList, [...new Set([...seedRelays, ...relays].map(r => r.trim().replace(/\/$/, '')))])
 
-  async #initSk () {
-    const pubkey = this.getPublicKey()
-    const profile = this.signEvent({
+    const profile = await this.signEvent({
       kind: 0,
-      pubkey,
+      pubkey: this.getPublicKey(),
       tags: [],
       content: JSON.stringify({
         name: `Publisher #${Math.random().toString(36).slice(2)}`,
@@ -110,8 +85,7 @@ export default class NostrSigner {
       }),
       created_at: Math.floor(Date.now() / 1000)
     })
-    const writeRelays = (await this.getRelays()).write
-    await nostrRelays.sendEvent(profile, writeRelays)
+    await nostrRelays.sendEvent(profile, relays)
   }
 
   // hex
