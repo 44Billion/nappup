@@ -340,7 +340,7 @@ async function uploadSiteManifest ({ dTag, channel, fileMetadata, uploadService,
     draft: 35130 // vibe coded preview
   }[channel] ?? 35128
 
-  const pathTags = fileMetadata.map(v => ['path', v.rootHash, v.filename, v.mimeType])
+  const pathTags = fileMetadata.map(v => ['path', v.filename, v.rootHash])
   const tags = [
     ['d', dTag],
     ...pathTags,
@@ -369,11 +369,11 @@ async function uploadSiteManifest ({ dTag, channel, fileMetadata, uploadService,
 
   if (!shouldReupload && mostRecentEvent) {
     const recentPathTags = mostRecentEvent.tags
-      .filter(t => t[0] === 'path' && t[2] !== '.well-known/napp.json')
+      .filter(t => t[0] === 'path' && t[1] !== '.well-known/napp.json')
       .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
 
     const currentPathTags = pathTags
-      .filter(t => t[2] !== '.well-known/napp.json')
+      .filter(t => t[1] !== '.well-known/napp.json')
       .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
 
     const recentServiceTag = mostRecentEvent.tags.find(t => t[0] === 'service')
@@ -381,7 +381,7 @@ async function uploadSiteManifest ({ dTag, channel, fileMetadata, uploadService,
 
     const isSame = !serviceChanged && currentPathTags.length === recentPathTags.length && currentPathTags.every((t, i) => {
       const rt = recentPathTags[i]
-      return rt.length >= 4 && rt[1] === t[1] && rt[2] === t[2] && rt[3] === t[3]
+      return rt.length >= 3 && rt[1] === t[1] && rt[2] === t[2]
     })
 
     if (isSame) {
