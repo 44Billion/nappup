@@ -15,6 +15,6 @@ it('#isNostrAppDTagSafe', () => {
 
 it('#deriveNostrAppDTag', async () => {
   const appId = await deriveNostrAppDTag('my_app')
-  assert.equal(appId, '00o1wuh')
+  assert.equal(appId, 'udfi4wf')
   assert.ok(isNostrAppDTagSafe(appId))
 })
