@@ -17,7 +17,7 @@ describe('appEncode/appDecode', () => {
     delete decoded.kind
 
     assert.ok(encoded.startsWith('+'))
-    assert.equal(kind, 37448)
+    assert.equal(kind, 35128)
     assert.deepEqual(decoded, ref)
   })
 
@@ -35,7 +35,7 @@ describe('appEncode/appDecode', () => {
     delete decoded.kind
 
     assert.ok(encoded.startsWith('++'))
-    assert.equal(kind, 37449)
+    assert.equal(kind, 35129)
     assert.deepEqual(decoded, ref)
   })
 
@@ -43,7 +43,7 @@ describe('appEncode/appDecode', () => {
     const ref = {
       dTag: 'dedupe3',
       pubkey: 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5',
-      kind: 37450,
+      kind: 35130,
       relays: ['wss://relay.damus.io', 'wss://relay.44billion.net']
     }
 

@@ -9,9 +9,9 @@ const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
 const kindByChannel = {
-  main: 37448,
-  next: 37449,
-  draft: 37450
+  main: 35128,
+  next: 35129,
+  draft: 35130
 }
 const channelByKind = Object.fromEntries(
   Object.entries(kindByChannel).map(([k, v]) => [v, k])

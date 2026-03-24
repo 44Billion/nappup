@@ -32,8 +32,8 @@ function createFakeFile (content, relativePath, mimeType = 'text/html') {
  * toApp doesn't hit any real relay or blossom server.
  * Returns empty results for all relay queries, meaning:
  *   - no blossom servers (kind 10063)
- *   - no previous stall (kind 37348-37350)
- *   - no previous bundle (kind 37448-37450)
+ *   - no previous app listing (kind 37348-37350)
+ *   - no previous site manifest (kind 35128-35130)
  *   - no previous chunks (kind 34600)
  */
 async function setupMocks (t) {
@@ -59,7 +59,7 @@ async function setupMocks (t) {
 }
 
 describe('onEvent', () => {
-  it('should emit init, file-uploaded, stall-published, bundle-published, complete for a single file', async (t) => {
+  it('should emit init, file-uploaded, listing-published, manifest-published, complete for a single file', async (t) => {
     await setupMocks(t)
 
     const events = []
@@ -73,7 +73,7 @@ describe('onEvent', () => {
     })
 
     const types = events.map(e => e.type)
-    assert.deepEqual(types, ['init', 'file-uploaded', 'stall-published', 'bundle-published', 'complete'])
+    assert.deepEqual(types, ['init', 'file-uploaded', 'listing-published', 'manifest-published', 'complete'])
   })
 
   it('should include blossomCount, relayCount, totalFiles, dTag in init event', async (t) => {
@@ -231,7 +231,7 @@ describe('onEvent', () => {
     })
 
     const init = events.find(e => e.type === 'init')
-    // 2 files + stall + bundle = 4 steps
+    // 2 files + listing + manifest = 4 steps
     assert.equal(init.totalSteps, 4)
     assert.equal(init.totalFiles, 2)
   })
