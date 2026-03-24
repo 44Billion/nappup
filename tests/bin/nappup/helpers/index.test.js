@@ -27,11 +27,6 @@ describe('bin/index.js', () => {
       assert.strictEqual(dTag, 'my-app-d-tag')
     })
 
-    it('should parse the app ID raw argument', () => {
-      const { dTagRaw } = parseArgs(['-D', 'My App Name'])
-      assert.strictEqual(dTagRaw, 'My App Name')
-    })
-
     it('should parse all arguments together', () => {
       const { dir, sk, dTag } = parseArgs(['/some/path', '-s', 'my-secret-key', '-d', 'my-app-d-tag'])
       assert.strictEqual(dir, path.resolve('/some/path'))

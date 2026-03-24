@@ -9,7 +9,6 @@ export function parseArgs (args) {
   let dir = null
   let sk = null
   let dTag = null
-  let dTagRaw = null
   let channel = null
   let shouldReupload = false
   let yes = false
@@ -20,9 +19,6 @@ export function parseArgs (args) {
       i++ // Skip the next argument as it's part of -k
     } else if (args[i] === '-d' && args[i + 1]) {
       dTag = args[i + 1]
-      i++
-    } else if (args[i] === '-D' && args[i + 1]) {
-      dTagRaw = args[i + 1]
       i++
     } else if (args[i] === '--main' && channel === null) {
       channel = 'main'
@@ -43,7 +39,6 @@ export function parseArgs (args) {
     dir: path.resolve(dir ?? '.'),
     sk,
     dTag,
-    dTagRaw,
     channel: channel || 'main',
     shouldReupload,
     yes

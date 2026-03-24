@@ -3,7 +3,7 @@ import { appEncode } from '#helpers/nip19.js'
 import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
 import { getRelays } from '#helpers/signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'
-import { isNostrAppDTagSafe, deriveNostrAppDTag } from '#helpers/app.js'
+import { isNostrAppDTagSafe, GENERIC_BUILD_FOLDER_NAMES } from '#helpers/app.js'
 import { extractHtmlMetadata, findFavicon, findIndexFile } from '#helpers/app-metadata.js'
 import { NAPP_CATEGORIES } from '#config/napp-categories.js'
 import { getBlossomServers, healthCheckServers, uploadFilesToBlossom } from '#services/blossom-upload.js'
@@ -14,7 +14,7 @@ import { uploadBinaryDataChunks, throttledSendEvent } from '#services/irfs-uploa
 // await publishApp(
 //   fileList,
 //   window.nostr,
-//   { dTagRaw: 'My app identifier unique to this nsec', onEvent: ({ progress }) => console.log(progress) }
+//   { dTag: 'My app identifier unique to this nsec', onEvent: ({ progress }) => console.log(progress) }
 // )
 //
 // Simple usage -> onEvent: ({ progress, error }) => { if (error) { throw error } else { progressBar.style.width = `${progress}%` } }
@@ -65,7 +65,7 @@ export default async function (fileList, nostrSigner, opts = {}) {
  * The 'error' event is only emitted when using the default export wrapper.
  * Direct `toApp` callers receive the thrown error via normal async/await.
  */
-export async function toApp (fileList, nostrSigner, { log = () => {}, onEvent = () => {}, dTag, dTagRaw, channel = 'main', shouldReupload = false } = {}) {
+export async function toApp (fileList, nostrSigner, { log = () => {}, onEvent = () => {}, dTag, channel = 'main', shouldReupload = false } = {}) {
   let _steps = 0
   let _totalSteps = 1
   const emit = (event) => { try { onEvent({ ...event, progress: event.type === 'complete' ? 100 : Math.round((_steps / _totalSteps) * 100) }) } catch (_) {} }
@@ -79,10 +79,14 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, onEvent = 
   if (writeRelays.length === 0) throw new Error('No outbox relays found')
 
   if (typeof dTag === 'string') {
-    if (!isNostrAppDTagSafe(dTag)) throw new Error('dTag should be [A-Za-z0-9] with length ranging from 1 to 19')
+    if (!isNostrAppDTagSafe(dTag)) throw new Error('dTag must be a non-empty string with at most 260 characters')
   } else {
-    dTag = dTagRaw || fileList[0].webkitRelativePath.split('/')[0].trim()
-    if (!isNostrAppDTagSafe(dTag)) dTag = await deriveNostrAppDTag(dTag || Math.random().toString(36))
+    const folderName = fileList[0].webkitRelativePath.split('/')[0].trim()
+    if (GENERIC_BUILD_FOLDER_NAMES.has(folderName.toLowerCase())) {
+      throw new Error(`Folder name "${folderName}" is a generic build folder. Please provide a d tag with the -d flag.`)
+    }
+    dTag = folderName
+    if (!isNostrAppDTagSafe(dTag)) throw new Error('Could not derive a valid d tag from the folder name. Please provide one with the -d flag.')
   }
   const fileMetadata = []
 
