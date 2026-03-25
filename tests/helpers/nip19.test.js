@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { appEncode, appDecode, nsecEncode, nsecDecode } from '#helpers/nip19.js'
+import { appEncode, appDecode, nsecEncode, nsecDecode, NAPP_ENTITY_REGEX } from '#helpers/nip19.js'
 
 describe('appEncode/appDecode', () => {
   it('should encode and decode an app reference', () => {
@@ -37,6 +37,37 @@ describe('appEncode/appDecode', () => {
     assert.ok(encoded.startsWith('++'))
     assert.equal(kind, 35129)
     assert.deepEqual(decoded, ref)
+  })
+
+  it('should encode and decode an app reference with empty d tag', () => {
+    const ref = {
+      dTag: '',
+      pubkey: 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5',
+      channel: 'main',
+      relays: []
+    }
+
+    const encoded = appEncode(ref)
+    const decoded = appDecode(encoded)
+    const { kind } = decoded
+    delete decoded.kind
+
+    assert.ok(encoded.startsWith('+'))
+    assert.ok(NAPP_ENTITY_REGEX.test(encoded))
+    assert.equal(kind, 35128)
+    assert.deepEqual(decoded, ref)
+  })
+
+  it('should produce a valid entity for the minimum possible input (empty d tag, no relays)', () => {
+    const minPubkey = '0'.repeat(64)
+    const maxPubkey = 'f'.repeat(64)
+
+    for (const pubkey of [minPubkey, maxPubkey]) {
+      for (const channel of ['main', 'next', 'draft']) {
+        const encoded = appEncode({ dTag: '', pubkey, channel, relays: [] })
+        assert.ok(NAPP_ENTITY_REGEX.test(encoded), `regex should match for pubkey=${pubkey.slice(0, 8)}... channel=${channel}: ${encoded}`)
+      }
+    }
   })
 
   it('should encode and decode an app reference with kind set instead of channel', () => {
