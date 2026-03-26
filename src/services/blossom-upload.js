@@ -1,7 +1,24 @@
 import { sha256 } from '@noble/hashes/sha2.js'
-import { BlossomClient } from 'nostr-tools/nipb7'
 import nostrRelays from '#services/nostr-relays.js'
 import { bytesToBase16 } from '#helpers/base16.js'
+
+function normalizeServerUrl (url) {
+  if (!url.startsWith('http')) url = 'https://' + url
+  return url.replace(/\/$/, '') + '/'
+}
+
+async function createAuthHeader (signer, modify) {
+  const now = Math.floor(Date.now() / 1000)
+  const event = {
+    created_at: now,
+    kind: 24242,
+    content: 'blossom stuff',
+    tags: [['expiration', String(now + 60)]]
+  }
+  if (modify) modify(event)
+  const signedEvent = await signer.signEvent(event)
+  return 'Nostr ' + btoa(JSON.stringify(signedEvent))
+}
 
 /**
  * Fetches the user's blossom server list from their kind 10063 event.
@@ -27,31 +44,14 @@ export async function getBlossomServers (signer, writeRelays) {
 }
 
 /**
- * Health-checks blossom servers using the `check` method with a random sha256 hash.
- * A server is considered healthy if the check call completes without a network-level error.
- * The check is expected to fail with a 404 (blob not found), which is fine — it means the server is up.
- * Returns the subset of servers that are reachable.
+ * Health-checks blossom servers with a simple HEAD request.
+ * A server is considered healthy if fetch resolves (any HTTP status).
+ * Only network-level errors mark a server as unreachable.
  */
 export async function healthCheckServers (servers, signer, { log = () => {} } = {}) {
-  const randomBytes = crypto.getRandomValues(new Uint8Array(32))
-  const hashBuffer = await crypto.subtle.digest('SHA-256', randomBytes)
-  const randomHash = bytesToBase16(new Uint8Array(hashBuffer))
-
   const results = await Promise.allSettled(
     servers.map(async (serverUrl) => {
-      const client = new BlossomClient(serverUrl, signer)
-      try {
-        await client.check(randomHash)
-      } catch (err) {
-        // check() throws on non-2xx. A 404 means the server is up but blob doesn't exist — that's fine.
-        // We only want to filter out servers that are truly unreachable (network errors).
-        const message = err?.message ?? ''
-        if (message.includes('returned an error')) {
-          // Server responded with an HTTP error — it's reachable
-          return serverUrl
-        }
-        throw err
-      }
+      await fetch(normalizeServerUrl(serverUrl), { method: 'HEAD' })
       return serverUrl
     })
   )
@@ -85,15 +85,12 @@ export async function computeFileHash (file) {
  * Uploads a single file to a single blossom server with retry+backoff.
  * Returns { success: true, descriptor } or { success: false, error }.
  */
-async function uploadFileToServer (client, file, fileHash, mimeType, { shouldReupload, log, maxRetries = 5 }) {
+async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, { shouldReupload, log, maxRetries = 5 }) {
   // Check if already uploaded
   if (!shouldReupload) {
-    try {
-      await client.check(fileHash)
-      // File already exists on this server
+    const checkResponse = await fetch(serverUrl + fileHash, { method: 'HEAD' })
+    if (checkResponse.ok) {
       return { success: true, alreadyExists: true }
-    } catch {
-      // Not found — proceed to upload
     }
   }
 
@@ -101,15 +98,15 @@ async function uploadFileToServer (client, file, fileHash, mimeType, { shouldReu
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (attempt > 0) {
-        log(`Retrying upload to ${client.mediaserver} (attempt ${attempt + 1}/${maxRetries + 1})`)
+        log(`Retrying upload to ${serverUrl} (attempt ${attempt + 1}/${maxRetries + 1})`)
         await new Promise(resolve => setTimeout(resolve, pause))
         pause += 2000
       }
-      const authorization = await client.authorizationHeader((evt) => {
+      const authorization = await createAuthHeader(signer, (evt) => {
         evt.tags.push(['t', 'upload'])
         evt.tags.push(['x', fileHash])
       })
-      const response = await fetch(client.mediaserver + 'upload', {
+      const response = await fetch(serverUrl + 'upload', {
         method: 'PUT',
         headers: { 'Content-Type': mimeType, Authorization: authorization },
         body: file.stream(),
@@ -164,24 +161,24 @@ export async function uploadFilesToBlossom ({
   const fileServerResults = fileInfos.map(() => ({ successCount: 0, errors: [] }))
 
   // Upload to each server in parallel, but within a server, upload files sequentially
-  const serverTasks = servers.map(async (serverUrl) => {
-    const client = new BlossomClient(serverUrl, signer)
+  const serverTasks = servers.map(async (server) => {
+    const serverUrl = normalizeServerUrl(server)
 
     for (let i = 0; i < fileInfos.length; i++) {
       const info = fileInfos[i]
-      log(`Uploading ${info.filename} to ${serverUrl}`)
-      const result = await uploadFileToServer(client, info.file, info.sha256, info.mimeType, { shouldReupload, log, maxRetries })
+      log(`Uploading ${info.filename} to ${server}`)
+      const result = await uploadFileToServer(serverUrl, signer, info.file, info.sha256, info.mimeType, { shouldReupload, log, maxRetries })
 
       if (result.success) {
         fileServerResults[i].successCount++
         if (result.alreadyExists) {
-          log(`${info.filename}: Already exists on ${serverUrl}`)
+          log(`${info.filename}: Already exists on ${server}`)
         } else {
-          log(`${info.filename}: Uploaded to ${serverUrl}`)
+          log(`${info.filename}: Uploaded to ${server}`)
         }
       } else {
-        fileServerResults[i].errors.push({ server: serverUrl, error: result.error })
-        log(`${info.filename}: Failed to upload to ${serverUrl}: ${result.error?.message ?? result.error}`)
+        fileServerResults[i].errors.push({ server, error: result.error })
+        log(`${info.filename}: Failed to upload to ${server}: ${result.error?.message ?? result.error}`)
       }
     }
   })
