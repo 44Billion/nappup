@@ -105,17 +105,21 @@ async function uploadFileToServer (client, file, fileHash, mimeType, { shouldReu
         await new Promise(resolve => setTimeout(resolve, pause))
         pause += 2000
       }
-      const descriptor = await client.httpCall(
-        'PUT',
-        'upload',
-        mimeType,
-        () => client.authorizationHeader((evt) => {
-          evt.tags.push(['t', 'upload'])
-          evt.tags.push(['x', fileHash])
-        }),
-        file.stream(),
-        {}
-      )
+      const authorization = await client.authorizationHeader((evt) => {
+        evt.tags.push(['t', 'upload'])
+        evt.tags.push(['x', fileHash])
+      })
+      const response = await fetch(client.mediaserver + 'upload', {
+        method: 'PUT',
+        headers: { 'Content-Type': mimeType, Authorization: authorization },
+        body: file.stream(),
+        duplex: 'half'
+      })
+      if (response.status >= 300) {
+        const reason = response.headers.get('X-Reason') || response.statusText
+        throw new Error(`upload returned an error (${response.status}): ${reason}`)
+      }
+      const descriptor = await response.json()
       return { success: true, descriptor }
     } catch (err) {
       if (attempt === maxRetries) {
