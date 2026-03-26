@@ -55,7 +55,7 @@ export async function confirmArgs (args) {
     return new Promise(resolve => rl.question(query, resolve))
   }
   const answer = await askQuestion(
-    `Publish app from '${args.dir}' to the ${args.channel} release channel? (y/n) `
+    `Publish app from '${args.dir}' as '${args.dTag}' to the ${args.channel} release channel? (y/n) `
   )
   if (answer.toLowerCase() !== 'y') {
     console.log('Operation cancelled by user.')

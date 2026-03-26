@@ -105,7 +105,17 @@ async function uploadFileToServer (client, file, fileHash, mimeType, { shouldReu
         await new Promise(resolve => setTimeout(resolve, pause))
         pause += 2000
       }
-      const descriptor = await client.uploadBlob(file, mimeType)
+      const descriptor = await client.httpCall(
+        'PUT',
+        'upload',
+        mimeType,
+        () => client.authorizationHeader((evt) => {
+          evt.tags.push(['t', 'upload'])
+          evt.tags.push(['x', fileHash])
+        }),
+        file.stream(),
+        {}
+      )
       return { success: true, descriptor }
     } catch (err) {
       if (attempt === maxRetries) {

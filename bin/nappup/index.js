@@ -11,10 +11,9 @@ import {
 import toApp from '#index.js'
 
 const args = parseArgs(process.argv.slice(2))
-await confirmArgs(args)
 
-const { dir, sk, channel, shouldReupload } = args
 let { dTag } = args
+const { dir, sk, channel, shouldReupload } = args
 
 if (!dTag) {
   let folderName = path.basename(dir)
@@ -29,6 +28,9 @@ if (!dTag) {
   }
   dTag = folderName
 }
+args.dTag = dTag
+
+await confirmArgs(args)
 
 const fileList = await toFileList(getFiles(dir), dir)
 
