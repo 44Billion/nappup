@@ -1,3 +1,4 @@
+import { sha256 } from '@noble/hashes/sha2.js'
 import { BlossomClient } from 'nostr-tools/nipb7'
 import nostrRelays from '#services/nostr-relays.js'
 import { bytesToBase16 } from '#helpers/base16.js'
@@ -67,12 +68,17 @@ export async function healthCheckServers (servers, signer, { log = () => {} } = 
 }
 
 /**
- * Computes the sha256 hex hash of a File/Blob.
+ * Computes the sha256 hex hash of a File/Blob using streaming for memory efficiency.
  */
 export async function computeFileHash (file) {
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes)
-  return bytesToBase16(new Uint8Array(hashBuffer))
+  const hash = sha256.create()
+  const reader = file.stream().getReader()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    hash.update(value)
+  }
+  return bytesToBase16(hash.digest())
 }
 
 /**
