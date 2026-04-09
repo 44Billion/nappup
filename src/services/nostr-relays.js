@@ -68,39 +68,34 @@ export class NostrRelays {
     const events = []
     const promises = relays.map(async (url) => {
       let sub
-      let isClosed = false
       const p = Promise.withResolvers()
+      const t = Promise.withResolvers()
       const timer = maybeUnref(setTimeout(() => {
-        isClosed = true
         sub?.close()
-        p.reject(new Error(`timeout: ${url}`))
+        t.reject(new Error(`timeout: ${url}`))
       }, timeout))
-      try {
-        const relay = await this.#getRelay(url)
-        sub = relay.subscribe([filter], {
-          onevent: (event) => {
-            event.meta = { relay: url }
-            events.push(event)
-          },
-          onclose: err => {
-            clearTimeout(timer)
-            if (isClosed) return
-            // May have closed normally, without error
-            err ? p.reject(err) : p.resolve()
-          },
-          oneose: () => {
-            clearTimeout(timer)
-            isClosed = true
-            sub.close()
-            p.resolve()
-          }
-        })
-      } catch (err) {
-        clearTimeout(timer)
-        p.reject(err)
-      }
 
-      return p.promise
+      ;(async () => {
+        try {
+          const relay = await this.#getRelay(url)
+          sub = relay.subscribe([filter], {
+            onevent: (event) => {
+              event.meta = { relay: url }
+              events.push(event)
+            },
+            onclose: err => err ? p.reject(err) : p.resolve(),
+            oneose: () => { sub.close(); p.resolve() }
+          })
+        } catch (err) {
+          p.reject(err)
+        }
+      })()
+
+      try {
+        await Promise.race([p.promise, t.promise])
+      } finally {
+        clearTimeout(timer)
+      }
     })
 
     const results = await Promise.allSettled(promises)
@@ -119,27 +114,32 @@ export class NostrRelays {
     if (eventToSend.meta) delete eventToSend.meta
 
     const promises = relays.map(async (url) => {
-      let timer
       const p = Promise.withResolvers()
-      try {
-        timer = maybeUnref(setTimeout(() => {
-          p.reject(new Error(`timeout: ${url}`))
-        }, timeout))
+      const t = Promise.withResolvers()
+      const timer = maybeUnref(setTimeout(() => {
+        t.reject(new Error(`timeout: ${url}`))
+      }, timeout))
 
-        const relay = await this.#getRelay(url)
-        await relay.publish(eventToSend)
-        p.resolve()
-      } catch (err) {
-        if (err.message?.startsWith('duplicate:')) return p.resolve()
-        if (err.message?.startsWith('mute:')) {
-          console.info(`${url} - ${err.message}`)
-          return p.resolve()
+      ;(async () => {
+        try {
+          const relay = await this.#getRelay(url)
+          await relay.publish(eventToSend)
+          p.resolve()
+        } catch (err) {
+          if (err.message?.startsWith('duplicate:')) return p.resolve()
+          if (err.message?.startsWith('mute:')) {
+            console.info(`${url} - ${err.message}`)
+            return p.resolve()
+          }
+          p.reject(err)
         }
-        p.reject(err)
+      })()
+
+      try {
+        await Promise.race([p.promise, t.promise])
       } finally {
         clearTimeout(timer)
       }
-      return p.promise
     })
 
     const results = await Promise.allSettled(promises)
