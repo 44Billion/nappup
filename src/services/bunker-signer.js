@@ -2,7 +2,6 @@ import { generateSecretKey } from 'nostr-tools/pure'
 import { BunkerSigner, parseBunkerInput } from 'nostr-tools/nip46'
 import { getRelays } from '#helpers/signer.js'
 
-const CONNECT_TIMEOUT = 30_000
 const createToken = Symbol('createToken')
 
 export default class NostrBunkerSigner {
@@ -15,18 +14,25 @@ export default class NostrBunkerSigner {
     this.#publicKey = publicKey
   }
 
-  static async create (bunkerUrl) {
+  static async create (bunkerUrl, { connectTimeout = 30_000 } = {}) {
     const bp = await parseBunkerInput(bunkerUrl)
     if (!bp) throw new Error('Invalid bunker URL')
     if (bp.relays.length === 0) throw new Error('Bunker URL must include at least one relay (?relay=wss://...)')
 
     const clientSk = generateSecretKey()
-    const bunker = new BunkerSigner(clientSk, bp)
+    const bunker = BunkerSigner.fromBunker(clientSk, bp)
 
-    await Promise.race([
-      bunker.connect(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Bunker connection timed out')), CONNECT_TIMEOUT))
-    ])
+    let timeoutHandle
+    try {
+      await Promise.race([
+        bunker.connect(),
+        new Promise((resolve, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error('Bunker connection timed out')), connectTimeout)
+        })
+      ])
+    } finally {
+      clearTimeout(timeoutHandle)
+    }
 
     const publicKey = await bunker.getPublicKey()
     return new this(createToken, bunker, publicKey)
