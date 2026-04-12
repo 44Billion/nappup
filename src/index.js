@@ -75,7 +75,7 @@ export async function toApp (fileList, nostrSigner, { log = () => {}, onEvent = 
     nostrSigner.getRelays = getRelays
   }
   const writeRelays = [...new Set((await nostrSigner.getRelays()).write.map(r => r.trim().replace(/\/$/, '')))]
-  log(`Found ${writeRelays.length} outbox relays for pubkey ${nostrSigner.getPublicKey()}:\n${writeRelays.join(', ')}`)
+  log(`Found ${writeRelays.length} outbox relays for pubkey ${await nostrSigner.getPublicKey()}:\n${writeRelays.join(', ')}`)
   if (writeRelays.length === 0) throw new Error('No outbox relays found')
 
   if (typeof dTag === 'string') {

@@ -46,6 +46,7 @@ export default class NostrSigner {
     let isNewSk = false
     if (process.env.NOSTR_SECRET_KEY) {
       let envSk = process.env.NOSTR_SECRET_KEY
+      if (envSk.startsWith('bunker://')) throw new Error('bunker:// URLs are not supported by NostrSigner. Use NostrBunkerSigner.create() instead.')
       if (envSk.startsWith('nsec')) envSk = nsecDecode(envSk)
       skBytes = base16ToBytes(envSk)
     } else {

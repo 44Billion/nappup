@@ -26,7 +26,7 @@ nappup [directory] [options]
 
 | Flag | Description |
 |------|-------------|
-| `-s <secret_key>` | Your Nostr secret key (hex or nsec format) used to sign the application event. See [Authentication](#authentication) for alternatives. |
+| `-s <secret_key>` | Your Nostr secret key (hex, nsec, or `bunker://` URL) used to sign the application event. See [Authentication](#authentication) for alternatives. |
 | `-d <d_tag>` | The identifier (`d` tag) for your application. Any UTF-8 text up to 260 characters. If omitted, defaults to the directory name. Avoid generic names like `dist` or `build` - use something unique among your other apps like `mycoolapp`. |
 | `-y` | Skip confirmation prompt. Useful for CI/CD pipelines or automated scripts. |
 | `-r` | Force re-upload. By default, Napp Up! might skip files that haven't changed. Use this flag to ensure everything is pushed fresh. |
@@ -43,13 +43,18 @@ Napp Up! supports multiple ways to provide your Nostr secret key:
    nappup -s nsec1...
    ```
 
-2. **Environment variable**: Set `NOSTR_SECRET_KEY` in your environment or a `.env` file:
+2. **Remote signer (NIP-46)**: Pass a `bunker://` URL to sign events via a remote signer like [nak](https://github.com/fiatjaf/nak?tab=readme-ov-file#start-a-bunker-that-persists-its-metadata-secret-key-relays-authorized-client-pubkeys-to-disc) or [Amber](https://github.com/greenart7c3/Amber):
+   ```bash
+   nappup -s 'bunker://<pubkey>?relay=wss://relay.example.com&secret=<token>'
+   ```
+
+3. **Environment variable**: Set `NOSTR_SECRET_KEY` in your environment or a `.env` file (also supports `bunker://` URLs):
    ```bash
    export NOSTR_SECRET_KEY=nsec1...
    nappup ./dist
    ```
 
-3. **Auto-generated key**: If no key is provided, Napp Up! will generate a new keypair automatically and store it (as nsec) in your project's `.env` file for future use.
+4. **Auto-generated key**: If no key is provided, Napp Up! will generate a new keypair automatically and store it (as nsec) in your project's `.env` file for future use.
 
 ### Examples
 

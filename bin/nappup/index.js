@@ -34,4 +34,18 @@ await confirmArgs(args)
 
 const fileList = await toFileList(getFiles(dir), dir)
 
-await toApp(fileList, await NostrSigner.create(sk), { log: console.log.bind(console), dTag, channel, shouldReupload })
+const bunkerUrl = sk?.startsWith('bunker://') ? sk : (!sk && process.env.NOSTR_SECRET_KEY?.startsWith('bunker://')) ? process.env.NOSTR_SECRET_KEY : null
+
+let signer
+if (bunkerUrl) {
+  const { default: NostrBunkerSigner } = await import('#services/bunker-signer.js')
+  signer = await NostrBunkerSigner.create(bunkerUrl)
+} else {
+  signer = await NostrSigner.create(sk)
+}
+
+try {
+  await toApp(fileList, signer, { log: console.log.bind(console), dTag, channel, shouldReupload })
+} finally {
+  await signer.close?.()
+}
