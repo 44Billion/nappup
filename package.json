@@ -6,7 +6,7 @@
     "url": "git+https://github.com/44billion/nappup.git"
   },
   "license": "MIT",
-  "version": "1.9.1",
+  "version": "2.0.0",
   "description": "Nostr App Uploader",
   "type": "module",
   "scripts": {
@@ -21,8 +21,9 @@
     "@noble/hashes": "^2.0.0",
     "dotenv": "^17.2.0",
     "file-type": "^21.0.0",
+    "libp2r2p": "^0.1.0",
     "mime-types": "^3.0.1",
-    "nmmr": "^1.0.9",
+    "nmmr": "^2.0.0",
     "nostr-tools": "^2.23.3"
   },
   "devDependencies": {
@@ -50,11 +51,7 @@
     "upload"
   ],
   "files": [
-    "src",
-    "src/helpers",
-    "src/services",
-    "lib",
-    "bin",
-    "bin/nappup"
+    "src/**/*.js",
+    "bin/nappup/*.js"
   ]
 }

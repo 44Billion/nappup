@@ -134,7 +134,7 @@ async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, 
  * Different servers run in parallel.
  *
  * Returns { uploadedFiles: [...], failedFiles: [...] }
- * where each uploadedFile has { file, filename, sha256, mimeType }
+ * where each uploadedFile has { file, filename, sha256, mimeType, size }
  * and each failedFile has { file, filename, mimeType, errors }.
  */
 export async function uploadFilesToBlossom ({
@@ -195,7 +195,8 @@ export async function uploadFilesToBlossom ({
         file: info.file,
         filename: info.filename,
         sha256: info.sha256,
-        mimeType: info.mimeType
+        mimeType: info.mimeType,
+        size: info.file.size
       })
     } else {
       failedFiles.push({

@@ -1,13 +1,14 @@
 import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
-import Base93Encoder from '#services/base93-encoder.js'
+import NMMR from 'nmmr'
+import { decode as base93Decode, encode as base93Encode } from 'libp2r2p/base93'
 import { stringifyEvent } from '#helpers/event.js'
 
 /**
  * Uploads binary data chunks for a file to Nostr relays using the InterRelay File System (IRFS).
  *
  * Splits file content via NMMR (Nostr Merkle Mountain Range) into chunks,
- * encodes each chunk with Base93, and publishes them as kind 34600 events.
- * Supports resume via created_at cursor alignment with previously stored chunks.
+ * encodes each chunk with Base93, and publishes them as kind 34601 events.
+ * Supports resume by querying the deterministic d tag of each MMR position.
  *
  * @param {object} params
  * @param {object} params.nmmr - NMMR instance with chunks already appended
@@ -16,51 +17,30 @@ import { stringifyEvent } from '#helpers/event.js'
  * @param {number} params.chunkLength - Total number of chunks
  * @param {Function} params.log - Logging function
  * @param {number} [params.pause=0] - Current pause duration in ms (for rate-limit backoff)
- * @param {string} params.mimeType - MIME type of the file
  * @param {boolean} [params.shouldReupload=false] - Whether to force re-upload existing chunks
  * @returns {Promise<{pause: number}>} Updated pause duration
  */
-export async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, log, pause = 0, mimeType, shouldReupload = false }) {
-  const pubkey = await signer.getPublicKey()
+export async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLength, log, pause = 0, shouldReupload = false }) {
   const writeRelays = (await signer.getRelays()).write
   const relays = [...new Set([...writeRelays, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
-
-  // Find max stored created_at for this file's chunks
   const rootHash = nmmr.getRoot()
-  const allCTags = Array.from({ length: chunkLength }, (_, i) => `${rootHash}:${i}`)
-  let maxStoredCreatedAt = 0
-
-  for (let i = 0; i < allCTags.length; i += 100) {
-    const batch = allCTags.slice(i, i + 100)
-    const storedEvents = (await nostrRelays.getEvents({
-      kinds: [34600],
-      authors: [pubkey],
-      '#c': batch,
-      limit: 1
-    }, relays)).result
-
-    if (storedEvents.length > 0) {
-      const batchMaxCreatedAt = storedEvents.reduce((m, e) => Math.max(m, (e && typeof e.created_at === 'number') ? e.created_at : 0), 0)
-      if (batchMaxCreatedAt > maxStoredCreatedAt) maxStoredCreatedAt = batchMaxCreatedAt
-    }
-  }
-
-  // Set initial created_at based on what's higher, maxStoredCreatedAt or current time
-  let createdAtCursor = (Math.max(maxStoredCreatedAt, Math.floor(Date.now() / 1000)) + chunkLength)
+  const dTags = Array.from({ length: chunkLength }, (_, index) => NMMR.deriveChunkId(rootHash, index))
+  const { eventsByD } = await getPreviousChunks(dTags, relays, signer)
 
   let chunkIndex = 0
   for await (const chunk of nmmr.getChunks()) {
-    const dTag = chunk.x
-    const currentCtag = `${chunk.rootX}:${chunk.index}`
-    const { otherCtags, hasCurrentCtag, foundEvent, missingRelays } = await getPreviousCtags(dTag, currentCtag, relays, signer)
-    if (!shouldReupload && hasCurrentCtag) {
-      // Handling of partial uploads/resumes:
-      // If we are observing an existing chunk, we use its created_at to re-align our cursor
-      // for the next chunks (so next chunk will be this_chunk_time - 1)
-      if (foundEvent) {
-        createdAtCursor = foundEvent.created_at - 1
-      }
+    if (chunk.total !== chunkLength || chunk.index !== chunkIndex) {
+      throw new Error('NMMR yielded inconsistent chunk metadata')
+    }
+    const dTag = NMMR.deriveChunkId(rootHash, chunk.index)
+    const storedEvents = eventsByD.get(dTag) ?? []
+    const validEvents = storedEvents.filter(event => isExpectedChunkEvent(event, { rootHash, index: chunk.index, total: chunk.total, dTag }))
+      .sort(compareEventsNewestFirst)
+    const foundEvent = validEvents[0]
+    const coveredRelays = new Set(validEvents.filter(event => event.id === foundEvent?.id).map(event => event.meta?.relay).filter(Boolean))
+    const missingRelays = relays.filter(relay => !coveredRelays.has(relay))
 
+    if (!shouldReupload && foundEvent) {
       if (missingRelays.length === 0) {
         log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
         continue
@@ -70,21 +50,18 @@ export async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLen
       continue
     }
 
-    const effectiveCreatedAt = createdAtCursor
-    // The lower chunk index, the higher created_at must be
-    // for relays to serve chunks in the most efficient order
-    createdAtCursor--
+    const now = Math.floor(Date.now() / 1000)
+    const newestStoredCreatedAt = storedEvents.reduce((latest, event) => Math.max(latest, Number.isSafeInteger(event.created_at) ? event.created_at : 0), 0)
+    const effectiveCreatedAt = Math.max(now, newestStoredCreatedAt + 1)
+    if (effectiveCreatedAt > now + 172800) throw new Error('Existing chunk timestamp is too far in the future to replace safely')
 
     const binaryDataChunk = {
-      kind: 34600,
+      kind: 34601,
       tags: [
         ['d', dTag],
-        ...otherCtags,
-        ['c', currentCtag, chunk.length, ...chunk.proof],
-        ...(mimeType ? [['m', mimeType]] : [])
+        ['mmr', String(chunk.index), String(chunk.total), base93Encode(chunk.proof)]
       ],
-      // These chunks already have the expected size of 51000 bytes
-      content: new Base93Encoder().update(chunk.contentBytes).getEncoded(),
+      content: base93Encode(chunk.contentBytes),
       created_at: effectiveCreatedAt
     }
 
@@ -94,6 +71,41 @@ export async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLen
     ;({ pause } = (await throttledSendEvent(event, relays, { pause, log, trailingPause: true })))
   }
   return { pause }
+}
+
+function compareEventsNewestFirst (a, b) {
+  if (a.created_at !== b.created_at) return b.created_at - a.created_at
+  return String(a.id).localeCompare(String(b.id))
+}
+
+export function parseChunkEvent (event) {
+  if (!event || event.kind !== 34601 || !Array.isArray(event.tags)) throw new Error('Wrong chunk event kind or tags')
+  const dTags = event.tags.filter(tag => Array.isArray(tag) && tag[0] === 'd')
+  const mmrTags = event.tags.filter(tag => Array.isArray(tag) && tag[0] === 'mmr')
+  if (dTags.length !== 1 || dTags[0].length !== 2 || !/^[0-9a-f]{64}$/.test(dTags[0][1])) throw new Error('Wrong chunk d tag')
+  if (mmrTags.length !== 1 || mmrTags[0].length !== 4) throw new Error('Wrong chunk mmr tag')
+
+  const [, index, total, encodedProof] = mmrTags[0]
+  const contentBytes = base93Decode(event.content)
+  const proof = base93Decode(encodedProof)
+  const root = NMMR.calculateRoot({ contentBytes, index, total, proof })
+  const numericIndex = Number(index)
+  const numericTotal = Number(total)
+  if (contentBytes.length < 1 || contentBytes.length > 51000 || (numericIndex < numericTotal - 1 && contentBytes.length !== 51000)) {
+    throw new Error('Wrong chunk byte length')
+  }
+  const d = NMMR.deriveChunkId(root, index)
+  if (d !== dTags[0][1]) throw new Error('Chunk d tag mismatch')
+  return { root, index: numericIndex, total: numericTotal, proof, contentBytes, d }
+}
+
+function isExpectedChunkEvent (event, expected) {
+  try {
+    const parsed = parseChunkEvent(event)
+    return parsed.root === expected.rootHash && parsed.index === expected.index && parsed.total === expected.total && parsed.d === expected.dTag
+  } catch (_) {
+    return false
+  }
 }
 
 /**
@@ -180,62 +192,25 @@ export async function throttledSendEvent (event, relays, {
   })
 }
 
-/**
- * Checks if a chunk (identified by its d-tag) already exists on relays.
- *
- * Returns info about existing c-tags on the stored event (for deduplication),
- * whether the current c-tag is already present, the found event itself,
- * and which relays are missing the event.
- *
- * @param {string} dTagValue - The d-tag value of the chunk event
- * @param {string} currentCtagValue - The current c-tag value (rootHash:index)
- * @param {string[]} relays - Array of relay URLs to check
- * @param {object} signer - Nostr signer with getPublicKey()
- * @returns {Promise<{otherCtags: Array, hasEvent: boolean, hasCurrentCtag: boolean, foundEvent?: object, missingRelays?: string[]}>}
- */
-export async function getPreviousCtags (dTagValue, currentCtagValue, relays, signer) {
+export async function getPreviousChunks (dTagValues, relays, signer) {
   const targetRelays = [...new Set([...relays, ...nappRelays].map(r => r.trim().replace(/\/$/, '')))]
-  const storedEvents = (await nostrRelays.getEvents({
-    kinds: [34600],
-    authors: [await signer.getPublicKey()],
-    '#d': [dTagValue],
-    limit: 1
-  }, targetRelays)).result
+  const eventsByD = new Map(dTagValues.map(dTag => [dTag, []]))
+  const pubkey = await signer.getPublicKey()
 
-  let hasCurrentCtag = false
-  const hasEvent = storedEvents.length > 0
-  if (!hasEvent) return { otherCtags: [], hasEvent, hasCurrentCtag }
+  for (let offset = 0; offset < dTagValues.length; offset += 100) {
+    const batch = dTagValues.slice(offset, offset + 100)
+    const storedEvents = (await nostrRelays.getEvents({
+      kinds: [34601],
+      authors: [pubkey],
+      '#d': batch,
+      limit: batch.length
+    }, targetRelays)).result
 
-  const cTagValues = { [currentCtagValue]: true }
-  storedEvents.sort((a, b) => b.created_at - a.created_at)
-  const bestEvent = storedEvents[0]
-  const prevTags = bestEvent.tags
+    for (const event of storedEvents) {
+      const dTag = event.tags?.find(tag => tag[0] === 'd')?.[1]
+      if (eventsByD.has(dTag)) eventsByD.get(dTag).push(event)
+    }
+  }
 
-  if (!Array.isArray(prevTags)) return { otherCtags: [], hasEvent, hasCurrentCtag }
-
-  hasCurrentCtag = prevTags.some(tag =>
-    Array.isArray(tag) &&
-    tag[0] === 'c' &&
-    tag[1] === currentCtagValue
-  )
-
-  const otherCtags = prevTags
-    .filter(v => {
-      const isCTag =
-        Array.isArray(v) &&
-        v[0] === 'c' &&
-        typeof v[1] === 'string' &&
-        /^[0-9a-f]{64}:\d+$/.test(v[1])
-      if (!isCTag) return false
-
-      const isntDuplicate = !cTagValues[v[1]]
-      cTagValues[v[1]] = true
-      return isCTag && isntDuplicate
-    })
-
-  const matchingEvents = storedEvents.filter(e => e.id === bestEvent.id)
-  const coveredRelays = new Set(matchingEvents.map(e => e.meta?.relay).filter(Boolean))
-  const missingRelays = targetRelays.filter(r => !coveredRelays.has(r))
-
-  return { otherCtags, hasEvent, hasCurrentCtag, foundEvent: bestEvent, missingRelays }
+  return { eventsByD, targetRelays }
 }

@@ -4,8 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import NMMR from 'nmmr'
-import Base93Encoder from '#services/base93-encoder.js'
-import Base93Decoder from '#services/base93-decoder.js'
+import { Base93Decoder, Base93Encoder } from 'libp2r2p/base93'
 import { streamToChunks } from '#helpers/stream.js'
 
 // Get current file directory (equivalent to __dirname in CommonJS)

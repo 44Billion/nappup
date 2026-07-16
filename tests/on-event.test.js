@@ -32,9 +32,8 @@ function createFakeFile (content, relativePath, mimeType = 'text/html') {
  * toApp doesn't hit any real relay or blossom server.
  * Returns empty results for all relay queries, meaning:
  *   - no blossom servers (kind 10063)
- *   - no previous app listing (kind 37348-37350)
  *   - no previous site manifest (kind 35128-35130)
- *   - no previous chunks (kind 34600)
+ *   - no previous chunks (kind 34601)
  */
 async function setupMocks (t) {
   const nostrRelaysModule = await import('#services/nostr-relays.js')
@@ -59,7 +58,7 @@ async function setupMocks (t) {
 }
 
 describe('onEvent', () => {
-  it('should emit init, file-uploaded, listing-published, manifest-published, complete for a single file', async (t) => {
+  it('should emit init, file-uploaded, manifest-published, complete for a single file', async (t) => {
     await setupMocks(t)
 
     const events = []
@@ -73,7 +72,7 @@ describe('onEvent', () => {
     })
 
     const types = events.map(e => e.type)
-    assert.deepEqual(types, ['init', 'file-uploaded', 'listing-published', 'manifest-published', 'complete'])
+    assert.deepEqual(types, ['init', 'file-uploaded', 'manifest-published', 'complete'])
   })
 
   it('should include blossomCount, relayCount, totalFiles, dTag in init event', async (t) => {
@@ -216,7 +215,7 @@ describe('onEvent', () => {
     )
   })
 
-  it('should set totalSteps = totalFiles + 2 when no icon', async (t) => {
+  it('should set totalSteps = totalFiles + one unified manifest when no icon', async (t) => {
     await setupMocks(t)
 
     const events = []
@@ -231,8 +230,8 @@ describe('onEvent', () => {
     })
 
     const init = events.find(e => e.type === 'init')
-    // 2 files + listing + manifest = 4 steps
-    assert.equal(init.totalSteps, 4)
+    // 2 files + one unified manifest = 3 steps
+    assert.equal(init.totalSteps, 3)
     assert.equal(init.totalFiles, 2)
   })
 
