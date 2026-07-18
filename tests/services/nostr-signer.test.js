@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import NostrSigner from '#services/nostr-signer.js'
-import { nsecEncode } from '#helpers/nip19.js'
+import { nsecEncode } from 'libp2r2p/nip19'
 
 describe('NostrSigner', () => {
   it('should create a signer from a hex secret key', async () => {

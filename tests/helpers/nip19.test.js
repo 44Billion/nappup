@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { appEncode, appDecode, nsecEncode, nsecDecode, NAPP_ENTITY_REGEX } from '#helpers/nip19.js'
+import { appEncode, appDecode, nsecEncode, nsecDecode, NAPP_ENTITY_REGEX } from 'libp2r2p/nip19'
 
 describe('appEncode/appDecode', () => {
   it('should encode and decode an app reference', () => {

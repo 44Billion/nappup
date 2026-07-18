@@ -1,5 +1,5 @@
 import NMMR from 'nmmr'
-import { appEncode } from '#helpers/nip19.js'
+import { appEncode } from 'libp2r2p/nip19'
 import nostrRelays from '#services/nostr-relays.js'
 import { getRelays } from '#helpers/signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'

@@ -8,7 +8,7 @@ import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
 import { getRelays } from '#helpers/signer.js'
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
 import { finalizeEvent } from '#helpers/nip01.js'
-import { nsecDecode, nsecEncode } from '#helpers/nip19.js'
+import { nsecDecode, nsecEncode } from 'libp2r2p/nip19'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? `${__dirname}/../../.env`
