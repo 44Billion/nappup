@@ -6,7 +6,7 @@
     "url": "git+https://github.com/44billion/nappup.git"
   },
   "license": "MIT",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Nostr App Uploader",
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
     "nappup": "bin/nappup/index.js"
   },
   "dependencies": {
+    "@dotenvx/primitives": "^2.1.0",
     "@noble/curves": "^2.0.0",
     "@noble/hashes": "^2.0.0",
     "dotenv": "^17.2.0",

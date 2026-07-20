@@ -5,7 +5,7 @@ import { getRelays } from '#helpers/signer.js'
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
 import { finalizeEvent } from '#helpers/nip01.js'
 import { nsecDecode, nsecEncode } from 'libp2r2p/nip19'
-import { setDotenvValue } from '#services/dotenv.js'
+import { ensureDotenvInitialized, setEncryptedDotenvValue } from '#services/dotenv.js'
 
 const nip44 = {
   getConversationKey,
@@ -32,6 +32,7 @@ export default class NostrSigner {
       return new this(createToken, base16ToBytes(sk))
     }
 
+    ensureDotenvInitialized()
     let skBytes
     let isNewSk = false
     if (process.env.NOSTR_SECRET_KEY) {
@@ -42,7 +43,7 @@ export default class NostrSigner {
     } else {
       isNewSk = true
       sk = generateSecretKey()
-      setDotenvValue('NOSTR_SECRET_KEY', nsecEncode(sk))
+      setEncryptedDotenvValue('NOSTR_SECRET_KEY', nsecEncode(sk))
       skBytes = base16ToBytes(sk)
     }
     const ret = new this(createToken, skBytes)

@@ -112,7 +112,6 @@ export default class NostrBunkerSigner {
       )
 
       session.relays = [...bunker.pointer.relays]
-      session.userPubkey = publicKey
       try {
         persistBunkerSession(session)
       } catch (error) {

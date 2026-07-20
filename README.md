@@ -33,6 +33,7 @@ nappup [directory] [options]
 | `--main` | Publish to the **main** release channel. This is the default behavior. |
 | `--next` | Publish to the **next** release channel. Ideal for beta testing or staging builds. |
 | `--draft` | Publish to the **draft** release channel. Use this for internal testing or work-in-progress builds. |
+| `--dotenv-private-key <hex>` | Use a 32-byte hex private key to decrypt and manage encrypted credentials in `.env`. Prefer `DOTENV_PRIVATE_KEY_NAPPUP` because command-line arguments can be visible in shell history and process listings. |
 
 ## Authentication
 
@@ -57,7 +58,36 @@ Napp Up! supports multiple ways to provide your Nostr secret key:
 
 4. **Auto-generated key**: If no key is provided, Napp Up! will generate a new keypair automatically and store it (as nsec) in your project's `.env` file for future use.
 
-When `NOSTR_SECRET_KEY` in `.env` is a bunker URL, Napp Up! adds the local client key as a `#client_key=...` URI fragment while retaining the query-string `secret` for compatibility fallback. Reconnects first use the same client key without the token and retry with the token only if necessary. Keep `.env` out of version control: the client key and `LAST_CLI_BUNKER_SESSION` are signing credentials, and their Base64URL representation is not encryption. Use `DOTENV_CONFIG_PATH` to select a different dotenv file.
+When `NOSTR_SECRET_KEY` in `.env` is a bunker URL, Napp Up! adds the local client key as a `#client_key=...` URI fragment while retaining the query-string `secret` for compatibility fallback. Reconnects first use the same client key without the token and retry with the token only if necessary.
+
+Napp Up! stores `NOSTR_SECRET_KEY` and `LAST_CLI_BUNKER_SESSION` in the official dotenvx `encrypted:<base64>` format, using the compressed public key in `DOTENV_PUBLIC_KEY_NAPPUP`. The private key is selected from `--dotenv-private-key`, then `DOTENV_PRIVATE_KEY_NAPPUP` in the process environment, and finally a built-in fallback. The public key is selected from the `.env`, then the process environment, and finally derived from the selected private key.
+
+The built-in fallback makes migration automatic, but is public knowledge and therefore only hides plaintext; use an explicit private key for confidentiality. Generate one locally for storage in your secret manager with:
+
+```bash
+nappup env keygen
+```
+
+Alternatively, generate and export one directly into the current shell:
+
+```bash
+export DOTENV_PRIVATE_KEY_NAPPUP="$(nappup env keygen)"
+```
+
+`env keygen` writes only the generated 64-character lowercase hex key to standard output, writes a reminder to standard error, and never reads or modifies `.env`. Store the result in a secret manager; nappup cannot recover it.
+
+Because encryption itself requires only the public key, the following command can safely replace the Nostr secret without receiving the private key:
+
+```bash
+nappup env set NOSTR_SECRET_KEY
+printf '%s\n' 'nsec1...' | nappup env set NOSTR_SECRET_KEY
+```
+
+The interactive form hides and confirms the value. Redirected stdin and a positional value are also accepted; the positional form emits a warning because it may be exposed through shell history or process listings. With only `DOTENV_PUBLIC_KEY_NAPPUP`, `env set` can encrypt a replacement, while commands that need an existing value fail clearly without the matching private key.
+
+Existing plaintext values are encrypted automatically when used. If an explicit private key does not match the stored public key, it becomes authoritative: recoverable values are re-encrypted and inaccessible credentials are reset with a warning naming only the affected variables. This can result in a new publisher identity or bunker client key.
+
+Use `DOTENV_CONFIG_PATH` to select a different dotenv file. The private key must come from the process environment or CLI and is rejected if stored inside that file.
 
 ### Examples
 
