@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path'
 import NostrSigner from '#services/nostr-signer.js'
+import { nostrSecretKeySource } from '#services/dotenv.js'
 import { GENERIC_BUILD_FOLDER_NAMES } from '#helpers/app.js'
 import {
   parseArgs,
@@ -39,7 +40,9 @@ const bunkerUrl = sk?.startsWith('bunker://') ? sk : (!sk && process.env.NOSTR_S
 let signer
 if (bunkerUrl) {
   const { default: NostrBunkerSigner } = await import('#services/bunker-signer.js')
-  signer = await NostrBunkerSigner.create(bunkerUrl)
+  signer = await NostrBunkerSigner.create(bunkerUrl, {
+    source: sk ? 'cli' : nostrSecretKeySource === 'dotenv' ? 'dotenv' : 'cli'
+  })
 } else {
   signer = await NostrSigner.create(sk)
 }

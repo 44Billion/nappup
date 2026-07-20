@@ -1,178 +1,208 @@
-import { describe, it, beforeEach, afterEach, mock } from 'node:test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
+import { base16ToBytes } from 'libp2r2p/base16'
+import { BunkerSigner } from 'libp2r2p/nip46'
+import NostrBunkerSigner from '#services/bunker-signer.js'
 
-const FAKE_PUBKEY = 'b0b810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5'
-const FAKE_CLIENT_SK = new Uint8Array(32).fill(7)
+const REMOTE_PUBKEY = 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5'
+const USER_PUBKEY = 'b0b810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5'
+const CLIENT_KEY = '0000000000000000000000000000000000000000000000000000000000000007'
+const BUNKER_URL = `bunker://${REMOTE_PUBKEY}?relay=wss://relay.example.com&secret=tok`
 
-function makeMockBunker () {
+function temporaryDotenv () {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nappup-bunker-'))
   return {
+    filePath: path.join(directory, '.env'),
+    cleanup: () => fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+function makeMockBunker (pointer, overrides = {}) {
+  return {
+    pointer,
     connect: mock.fn(async () => {}),
-    getPublicKey: mock.fn(async () => FAKE_PUBKEY),
-    signEvent: mock.fn(async (e) => ({ ...e, id: 'signed-id', sig: 'signed-sig', pubkey: FAKE_PUBKEY })),
-    nip44Encrypt: mock.fn(async (_pk, text) => `enc:${text}`),
-    nip44Decrypt: mock.fn(async (_pk, ct) => `dec:${ct}`),
-    close: mock.fn(async () => {})
+    getPublicKey: mock.fn(async () => USER_PUBKEY),
+    signEvent: mock.fn(async event => ({ ...event, id: 'signed-id' })),
+    nip44Encrypt: mock.fn(async (_pubkey, plaintext) => `enc:${plaintext}`),
+    nip44Decrypt: mock.fn(async (_pubkey, ciphertext) => `dec:${ciphertext}`),
+    close: mock.fn(async () => {}),
+    ...overrides
+  }
+}
+
+function createOptions (filePath, bunkerFactory, extra = {}) {
+  return {
+    dotenvFilePath: filePath,
+    bunkerFactory,
+    generateClientKey: () => base16ToBytes(CLIENT_KEY),
+    connectTimeout: 50,
+    requestTimeout: 50,
+    ...extra
   }
 }
 
 describe('NostrBunkerSigner', () => {
-  describe('constructor guard', () => {
-    it('should reject direct construction without create()', async () => {
-      const { default: NostrBunkerSigner } = await import('#services/bunker-signer.js')
-      assert.throws(
-        () => new NostrBunkerSigner(),
-        { message: 'Use NostrBunkerSigner.create(bunkerUrl) to instantiate this class.' }
-      )
-    })
+  it('rejects direct construction and malformed URLs', async () => {
+    assert.throws(
+      () => new NostrBunkerSigner(),
+      { message: 'Use NostrBunkerSigner.create(bunkerUrl) to instantiate this class.' }
+    )
+    await assert.rejects(
+      () => NostrBunkerSigner.create('not-a-bunker-url'),
+      { message: 'Invalid bunker URL' }
+    )
+    await assert.rejects(
+      () => NostrBunkerSigner.create(`bunker://${REMOTE_PUBKEY}`),
+      { message: 'Bunker URL must include at least one relay (?relay=wss://...)' }
+    )
   })
 
-  describe('create() error paths (real nostr-tools)', () => {
-    it('should reject invalid bunker URLs', async () => {
-      const { default: NostrBunkerSigner } = await import('#services/bunker-signer.js')
-      await assert.rejects(
-        () => NostrBunkerSigner.create('not-a-bunker-url'),
-        { message: 'Invalid bunker URL' }
-      )
-    })
-
-    it('should reject bunker URLs with no relays', async () => {
-      const { default: NostrBunkerSigner } = await import('#services/bunker-signer.js')
-      await assert.rejects(
-        () => NostrBunkerSigner.create('bunker://a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5'),
-        { message: 'Bunker URL must include at least one relay (?relay=wss://...)' }
-      )
-    })
-  })
-
-  describe('delegation to nostr-tools (mocked)', () => {
-    let mockBunker
-    let parsedBp
-    let fromBunkerMock
-    let parseBunkerInputMock
-    let generateSecretKeyMock
-    let nip46Ctx
-    let pureCtx
-    // Cache-bust dynamic imports so each test re-evaluates bunker-signer.js
-    // against the fresh mock.module() bindings set up in beforeEach.
-    let importSeq = 0
-
-    beforeEach(() => {
-      parsedBp = { pubkey: FAKE_PUBKEY, relays: ['wss://relay.example.com'], secret: 'tok' }
-      mockBunker = makeMockBunker()
-      fromBunkerMock = mock.fn(() => mockBunker)
-      parseBunkerInputMock = mock.fn(async () => parsedBp)
-      generateSecretKeyMock = mock.fn(() => FAKE_CLIENT_SK)
-
-      nip46Ctx = mock.module('nostr-tools/nip46', {
-        namedExports: {
-          parseBunkerInput: parseBunkerInputMock,
-          BunkerSigner: { fromBunker: fromBunkerMock }
-        }
+  it('persists a new client key before connecting and uses the secret immediately', async t => {
+    const temporary = temporaryDotenv()
+    t.after(temporary.cleanup)
+    let persistedBeforeConnect = false
+    const factory = mock.fn((clientKey, pointer) => makeMockBunker(pointer, {
+      connect: mock.fn(async () => {
+        persistedBeforeConnect = fs.readFileSync(temporary.filePath, 'utf8').includes('LAST_CLI_BUNKER_SESSION=')
       })
-      pureCtx = mock.module('nostr-tools/pure', {
-        namedExports: { generateSecretKey: generateSecretKeyMock }
-      })
-    })
+    }))
 
-    afterEach(() => {
-      nip46Ctx.restore()
-      pureCtx.restore()
-    })
+    const signer = await NostrBunkerSigner.create(
+      BUNKER_URL,
+      createOptions(temporary.filePath, factory)
+    )
 
-    const loadSigner = () => import(`#services/bunker-signer.js?v=${++importSeq}`).then(m => m.default)
-
-    it('should call parseBunkerInput with the raw bunker URL', async () => {
-      const NostrBunkerSigner = await loadSigner()
-      await NostrBunkerSigner.create('bunker://anything')
-      assert.equal(parseBunkerInputMock.mock.calls.length, 1)
-      assert.deepEqual(parseBunkerInputMock.mock.calls[0].arguments, ['bunker://anything'])
-    })
-
-    it('should call BunkerSigner.fromBunker with the generated client key and parsed pointer', async () => {
-      const NostrBunkerSigner = await loadSigner()
-      await NostrBunkerSigner.create('bunker://x')
-      assert.equal(fromBunkerMock.mock.calls.length, 1)
-      assert.equal(fromBunkerMock.mock.calls[0].arguments[0], FAKE_CLIENT_SK)
-      assert.deepEqual(fromBunkerMock.mock.calls[0].arguments[1], parsedBp)
-    })
-
-    it('should call connect() and getPublicKey() on the bunker', async () => {
-      const NostrBunkerSigner = await loadSigner()
-      const signer = await NostrBunkerSigner.create('bunker://x')
-      assert.equal(mockBunker.connect.mock.calls.length, 1)
-      assert.equal(mockBunker.getPublicKey.mock.calls.length, 1)
-      assert.equal(signer.getPublicKey(), FAKE_PUBKEY)
-    })
-
-    it('should reject if connect() hangs longer than connectTimeout', async () => {
-      mockBunker.connect = mock.fn(() => new Promise(() => {})) // never resolves
-      const NostrBunkerSigner = await loadSigner()
-      await assert.rejects(
-        () => NostrBunkerSigner.create('bunker://x', { connectTimeout: 20 }),
-        { message: 'Bunker connection timed out' }
-      )
-    })
-
-    it('should delegate signEvent to the underlying bunker', async () => {
-      const NostrBunkerSigner = await loadSigner()
-      const signer = await NostrBunkerSigner.create('bunker://x')
-      const event = { kind: 1, content: 'hi', tags: [], created_at: 123 }
-      const signed = await signer.signEvent(event)
-      assert.equal(mockBunker.signEvent.mock.calls.length, 1)
-      assert.deepEqual(mockBunker.signEvent.mock.calls[0].arguments, [event])
-      assert.equal(signed.id, 'signed-id')
-    })
-
-    it('should delegate nip44.encrypt/decrypt to the underlying bunker', async () => {
-      const NostrBunkerSigner = await loadSigner()
-      const signer = await NostrBunkerSigner.create('bunker://x')
-      assert.equal(await signer.nip44.encrypt('peer', 'hello'), 'enc:hello')
-      assert.equal(await signer.nip44.decrypt('peer', 'cipher'), 'dec:cipher')
-      assert.deepEqual(mockBunker.nip44Encrypt.mock.calls[0].arguments, ['peer', 'hello'])
-      assert.deepEqual(mockBunker.nip44Decrypt.mock.calls[0].arguments, ['peer', 'cipher'])
-    })
-
-    it('should delegate close() to the underlying bunker', async () => {
-      const NostrBunkerSigner = await loadSigner()
-      const signer = await NostrBunkerSigner.create('bunker://x')
-      await signer.close()
-      assert.equal(mockBunker.close.mock.calls.length, 1)
-    })
-
-    it('should return cached pubkey synchronously after create()', async () => {
-      const NostrBunkerSigner = await loadSigner()
-      const signer = await NostrBunkerSigner.create('bunker://x')
-      assert.equal(signer.getPublicKey(), FAKE_PUBKEY)
-      assert.equal(signer.getPublicKey(), FAKE_PUBKEY)
-      // bunker.getPublicKey() should only be called once (during create())
-      assert.equal(mockBunker.getPublicKey.mock.calls.length, 1)
-    })
+    assert.equal(persistedBeforeConnect, true)
+    assert.deepEqual(factory.mock.calls[0].arguments[0], base16ToBytes(CLIENT_KEY))
+    assert.equal(factory.mock.calls[0].arguments[1].secret, 'tok')
+    assert.equal(signer.getPublicKey(), USER_PUBKEY)
+    await signer.close()
   })
 
-  describe('nostr-tools API shape (real)', () => {
-    it('BunkerSigner should still expose fromBunker static method', async () => {
-      const { BunkerSigner } = await import('nostr-tools/nip46')
-      assert.equal(typeof BunkerSigner.fromBunker, 'function')
-    })
+  it('does not create a bunker when persistence fails', async t => {
+    const temporary = temporaryDotenv()
+    t.after(temporary.cleanup)
+    const factory = mock.fn(() => makeMockBunker({}))
 
-    it('BunkerSigner instances should still expose expected methods', async () => {
-      const { BunkerSigner } = await import('nostr-tools/nip46')
-      const proto = BunkerSigner.prototype
-      assert.equal(typeof proto.connect, 'function')
-      assert.equal(typeof proto.getPublicKey, 'function')
-      assert.equal(typeof proto.signEvent, 'function')
-      assert.equal(typeof proto.nip44Encrypt, 'function')
-      assert.equal(typeof proto.nip44Decrypt, 'function')
-      assert.equal(typeof proto.close, 'function')
-    })
+    await assert.rejects(() => NostrBunkerSigner.create(BUNKER_URL, createOptions(
+      path.join(path.dirname(temporary.filePath), 'missing', '.env'),
+      factory
+    )), { code: 'ENOENT' })
 
-    it('parseBunkerInput should still parse a well-formed bunker URL', async () => {
-      const { parseBunkerInput } = await import('nostr-tools/nip46')
-      const bp = await parseBunkerInput('bunker://a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5?relay=wss://relay.example.com&secret=tok')
-      assert.ok(bp)
-      assert.equal(bp.pubkey, 'a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5')
-      assert.deepEqual(bp.relays, ['wss://relay.example.com'])
-      assert.equal(bp.secret, 'tok')
+    assert.equal(factory.mock.calls.length, 0)
+  })
+
+  it('allows a first connection without a secret', async t => {
+    const temporary = temporaryDotenv()
+    t.after(temporary.cleanup)
+    const factory = mock.fn((_clientKey, pointer) => makeMockBunker(pointer))
+    const url = `bunker://${REMOTE_PUBKEY}?relay=wss://relay.example.com`
+
+    await NostrBunkerSigner.create(url, createOptions(temporary.filePath, factory))
+
+    assert.equal(factory.mock.calls.length, 1)
+    assert.equal(factory.mock.calls[0].arguments[1].secret, null)
+    assert.match(fs.readFileSync(temporary.filePath, 'utf8'), /LAST_CLI_BUNKER_SESSION=/)
+  })
+
+  it('tries a reused key without a secret before falling back with the same key', async t => {
+    const temporary = temporaryDotenv()
+    t.after(temporary.cleanup)
+    const initialFactory = mock.fn((_clientKey, pointer) => makeMockBunker(pointer))
+    await NostrBunkerSigner.create(BUNKER_URL, createOptions(temporary.filePath, initialFactory))
+
+    const failed = makeMockBunker({}, {
+      connect: mock.fn(async () => { throw new Error('not authorized') })
     })
+    const recovered = makeMockBunker({
+      remoteSignerPubkey: REMOTE_PUBKEY,
+      relays: ['wss://preferred.example.com'],
+      secret: 'tok'
+    })
+    const factory = mock.fn((_clientKey, pointer) => pointer.secret === null ? failed : recovered)
+
+    await NostrBunkerSigner.create(BUNKER_URL, createOptions(temporary.filePath, factory, {
+      generateClientKey: () => { throw new Error('should reuse the persisted key') }
+    }))
+
+    assert.equal(factory.mock.calls.length, 2)
+    assert.equal(factory.mock.calls[0].arguments[1].secret, null)
+    assert.equal(factory.mock.calls[1].arguments[1].secret, 'tok')
+    assert.deepEqual(factory.mock.calls[0].arguments[0], factory.mock.calls[1].arguments[0])
+    assert.equal(failed.close.mock.calls.length, 1)
+  })
+
+  it('accepts an already-connected response when the session still answers', async t => {
+    const temporary = temporaryDotenv()
+    t.after(temporary.cleanup)
+    const bunker = makeMockBunker({
+      remoteSignerPubkey: REMOTE_PUBKEY,
+      relays: ['wss://relay.example.com'],
+      secret: null
+    }, {
+      connect: mock.fn(async () => { throw new Error('already connected') })
+    })
+    const factory = mock.fn(() => bunker)
+    const url = `${BUNKER_URL}#client_key=${CLIENT_KEY}`
+
+    await NostrBunkerSigner.create(url, createOptions(temporary.filePath, factory))
+
+    assert.equal(factory.mock.calls.length, 1)
+    assert.equal(bunker.getPublicKey.mock.calls.length, 2)
+  })
+
+  it('aborts, closes and reports a connection timeout', async t => {
+    const temporary = temporaryDotenv()
+    t.after(temporary.cleanup)
+    let signal
+    const bunker = makeMockBunker({}, {
+      connect: mock.fn(({ signal: receivedSignal }) => {
+        signal = receivedSignal
+        return new Promise((resolve, reject) => {
+          receivedSignal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true })
+        })
+      })
+    })
+    const factory = mock.fn(() => bunker)
+
+    await assert.rejects(
+      () => NostrBunkerSigner.create(BUNKER_URL, createOptions(temporary.filePath, factory, { connectTimeout: 10 })),
+      { message: 'Bunker connection timed out' }
+    )
+    assert.equal(signal.aborted, true)
+    assert.equal(bunker.close.mock.calls.length, 1)
+  })
+
+  it('preserves the nappup signer interface', async t => {
+    const temporary = temporaryDotenv()
+    t.after(temporary.cleanup)
+    const bunker = makeMockBunker({
+      remoteSignerPubkey: REMOTE_PUBKEY,
+      relays: ['wss://relay.example.com'],
+      secret: 'tok'
+    })
+    const signer = await NostrBunkerSigner.create(
+      BUNKER_URL,
+      createOptions(temporary.filePath, () => bunker)
+    )
+    const event = { kind: 1, content: 'hi', tags: [], created_at: 123 }
+
+    assert.equal((await signer.signEvent(event)).id, 'signed-id')
+    assert.equal(await signer.nip44.encrypt('peer', 'hello'), 'enc:hello')
+    assert.equal(await signer.nip44.decrypt('peer', 'cipher'), 'dec:cipher')
+    await signer.close()
+
+    assert.deepEqual(bunker.signEvent.mock.calls[0].arguments, [event])
+    assert.equal(bunker.close.mock.calls.length, 1)
+  })
+
+  it('uses the libp2r2p NIP-46 API', () => {
+    assert.equal(typeof BunkerSigner.fromBunker, 'function')
+    for (const method of ['connect', 'getPublicKey', 'signEvent', 'nip44Encrypt', 'nip44Decrypt', 'close']) {
+      assert.equal(typeof BunkerSigner.prototype[method], 'function')
+    }
   })
 })

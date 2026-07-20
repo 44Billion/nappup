@@ -47,6 +47,7 @@ Napp Up! supports multiple ways to provide your Nostr secret key:
    ```bash
    nappup -s 'bunker://<pubkey>?relay=wss://relay.example.com&secret=<token>'
    ```
+   Napp Up! creates a persistent NIP-46 client key before connecting. For URLs passed with `-s`, the latest session is stored as `LAST_CLI_BUNKER_SESSION` in the project's `.env`. A URL without `secret` is also valid when the remote signer uses its public key as the access capability.
 
 3. **Environment variable**: Set `NOSTR_SECRET_KEY` in your environment or a `.env` file (also supports `bunker://` URLs):
    ```bash
@@ -55,6 +56,8 @@ Napp Up! supports multiple ways to provide your Nostr secret key:
    ```
 
 4. **Auto-generated key**: If no key is provided, Napp Up! will generate a new keypair automatically and store it (as nsec) in your project's `.env` file for future use.
+
+When `NOSTR_SECRET_KEY` in `.env` is a bunker URL, Napp Up! adds the local client key as a `#client_key=...` URI fragment while retaining the query-string `secret` for compatibility fallback. Reconnects first use the same client key without the token and retry with the token only if necessary. Keep `.env` out of version control: the client key and `LAST_CLI_BUNKER_SESSION` are signing credentials, and their Base64URL representation is not encryption. Use `DOTENV_CONFIG_PATH` to select a different dotenv file.
 
 ### Examples
 

@@ -1,8 +1,69 @@
-import { generateSecretKey } from 'nostr-tools/pure'
-import { BunkerSigner, parseBunkerInput } from 'nostr-tools/nip46'
+import { BunkerSigner } from 'libp2r2p/nip46'
+import { base16ToBytes } from 'libp2r2p/base16'
 import { getRelays } from '#helpers/signer.js'
+import {
+  persistBunkerSession,
+  prepareBunkerSession
+} from '#services/bunker-session.js'
 
 const createToken = Symbol('createToken')
+const DEFAULT_CONNECT_TIMEOUT = 5_000
+const DEFAULT_REQUEST_TIMEOUT = 30_000
+
+function alreadyConnected (error) {
+  return /already connected/i.test(typeof error === 'string' ? error : error?.message || '')
+}
+
+async function closeQuietly (bunker) {
+  try {
+    await bunker?.close()
+  } catch {}
+}
+
+async function runWithDeadline (operation, timeout, timeoutMessage, onFailure) {
+  const controller = new AbortController()
+  let timer
+  const deadline = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), timeout)
+  })
+  const pending = Promise.resolve().then(() => operation(controller.signal))
+
+  try {
+    return await Promise.race([pending, deadline])
+  } catch (error) {
+    controller.abort()
+    await onFailure?.()
+    await pending.catch(() => {})
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function openBunker (session, secret, {
+  bunkerFactory,
+  connectTimeout
+}) {
+  const bunker = bunkerFactory(base16ToBytes(session.clientKey), {
+    remoteSignerPubkey: session.remoteSignerPubkey,
+    relays: session.relays,
+    secret
+  })
+
+  await runWithDeadline(async signal => {
+    try {
+      await bunker.connect({
+        clientMetadata: { name: 'nappup' },
+        signal
+      })
+    } catch (error) {
+      if (!alreadyConnected(error)) throw error
+      await bunker.getPublicKey({ signal })
+    }
+  }, connectTimeout, 'Bunker connection timed out', () => closeQuietly(bunker))
+
+  return bunker
+}
 
 export default class NostrBunkerSigner {
   #bunker
@@ -14,28 +75,54 @@ export default class NostrBunkerSigner {
     this.#publicKey = publicKey
   }
 
-  static async create (bunkerUrl, { connectTimeout = 30_000 } = {}) {
-    const bp = await parseBunkerInput(bunkerUrl)
-    if (!bp) throw new Error('Invalid bunker URL')
-    if (bp.relays.length === 0) throw new Error('Bunker URL must include at least one relay (?relay=wss://...)')
+  static async create (bunkerUrl, {
+    source = 'cli',
+    dotenvFilePath,
+    connectTimeout = DEFAULT_CONNECT_TIMEOUT,
+    requestTimeout = DEFAULT_REQUEST_TIMEOUT,
+    onWarning = console.warn,
+    generateClientKey,
+    bunkerFactory = (clientKey, pointer) => BunkerSigner.fromBunker(clientKey, pointer)
+  } = {}) {
+    const session = prepareBunkerSession(bunkerUrl, {
+      source,
+      ...(dotenvFilePath ? { filePath: dotenvFilePath } : {}),
+      onWarning,
+      ...(generateClientKey ? { generateClientKey } : {})
+    })
 
-    const clientSk = generateSecretKey()
-    const bunker = BunkerSigner.fromBunker(clientSk, bp)
-
-    let timeoutHandle
+    let bunker
     try {
-      await Promise.race([
-        bunker.connect(),
-        new Promise((resolve, reject) => {
-          timeoutHandle = setTimeout(() => reject(new Error('Bunker connection timed out')), connectTimeout)
-        })
-      ])
-    } finally {
-      clearTimeout(timeoutHandle)
-    }
+      if (session.reusedClientKey) {
+        try {
+          bunker = await openBunker(session, null, { bunkerFactory, connectTimeout })
+        } catch (error) {
+          if (!session.secret) throw error
+          bunker = await openBunker(session, session.secret, { bunkerFactory, connectTimeout })
+        }
+      } else {
+        bunker = await openBunker(session, session.secret, { bunkerFactory, connectTimeout })
+      }
 
-    const publicKey = await bunker.getPublicKey()
-    return new this(createToken, bunker, publicKey)
+      const publicKey = await runWithDeadline(
+        signal => bunker.getPublicKey({ timeout: requestTimeout, signal }),
+        requestTimeout,
+        'Bunker public key request timed out',
+        () => closeQuietly(bunker)
+      )
+
+      session.relays = [...bunker.pointer.relays]
+      session.userPubkey = publicKey
+      try {
+        persistBunkerSession(session)
+      } catch (error) {
+        onWarning?.(`Could not persist updated bunker session: ${error.message}`)
+      }
+      return new this(createToken, bunker, publicKey)
+    } catch (error) {
+      await closeQuietly(bunker)
+      throw error
+    }
   }
 
   getPublicKey () {

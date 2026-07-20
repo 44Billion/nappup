@@ -10,6 +10,7 @@ const MANAGED_MANIFEST_TAGS = new Set([
 export function normalizeManifestPath (value) {
   if (typeof value !== 'string') throw new TypeError('Manifest path must be a string')
   const path = value.startsWith('/') ? value.slice(1) : value
+  // eslint-disable-next-line no-control-regex
   if (!path || path.includes('\\') || /[\u0000-\u001f\u007f]/.test(path)) {
     throw new Error(`Unsafe manifest path: ${JSON.stringify(value)}`)
   }
