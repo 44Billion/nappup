@@ -1,4 +1,4 @@
-import { generateSecretKey } from 'nostr-tools/pure'
+import { generateSecretKey } from 'libp2r2p/key'
 import { bytesToBase16 } from 'libp2r2p/base16'
 import { toBunkerUrl } from 'libp2r2p/nip46'
 import {

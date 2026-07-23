@@ -1,5 +1,4 @@
-import { Relay } from 'nostr-tools/relay'
-import { maybeUnref } from '#helpers/timer.js'
+import { relayPool } from 'libp2r2p/relay'
 
 export const seedRelays = [
   'wss://relay.44billion.net',
@@ -14,145 +13,13 @@ export const freeRelays = [
   'wss://nos.lol',
   'wss://relay.damus.io'
 ]
-export const nappRelays = [
-  'wss://relay.44billion.net'
-]
+export const nappRelays = ['wss://relay.44billion.net']
 
-// Interacts with Nostr relays
-export class NostrRelays {
-  #relays = new Map()
-  #relayTimeouts = new Map()
-  #timeout = 30000 // 30 seconds
-
-  // Get a relay connection, creating one if it doesn't exist
-  async #getRelay (url) {
-    if (this.#relays.has(url)) {
-      clearTimeout(this.#relayTimeouts.get(url))
-      this.#relayTimeouts.set(url, maybeUnref(setTimeout(() => this.disconnect(url), this.#timeout)))
-      const relay = this.#relays.get(url)
-      // Reconnect if needed to avoid SendingOnClosedConnection errors
-      await relay.connect()
-      return relay
-    }
-
-    const relay = new Relay(url)
-    this.#relays.set(url, relay)
-
-    await relay.connect()
-
-    this.#relayTimeouts.set(url, maybeUnref(setTimeout(() => this.disconnect(url), this.#timeout)))
-
-    return relay
-  }
-
-  // Disconnect from a relay
-  async disconnect (url) {
-    if (this.#relays.has(url)) {
-      const relay = this.#relays.get(url)
-      if (relay.ws.readyState < 2) await relay.close()?.catch(console.log)
-      this.#relays.delete(url)
-      clearTimeout(this.#relayTimeouts.get(url))
-      this.#relayTimeouts.delete(url)
-    }
-  }
-
-  // Disconnect from all relays
-  async disconnectAll () {
-    for (const url of this.#relays.keys()) {
-      await this.disconnect(url)
-    }
-  }
-
-  // Get events from a list of relays
-  async getEvents (filter, relays, timeout = 5000) {
-    const events = []
-    const promises = relays.map(async (url) => {
-      let sub
-      const p = Promise.withResolvers()
-      const t = Promise.withResolvers()
-      const timer = maybeUnref(setTimeout(() => {
-        sub?.close()
-        t.reject(new Error(`timeout: ${url}`))
-      }, timeout))
-
-      ;(async () => {
-        try {
-          const relay = await this.#getRelay(url)
-          sub = relay.subscribe([filter], {
-            onevent: (event) => {
-              event.meta = { relay: url }
-              events.push(event)
-            },
-            onclose: err => err ? p.reject(err) : p.resolve(),
-            oneose: () => { sub.close(); p.resolve() }
-          })
-        } catch (err) {
-          p.reject(err)
-        }
-      })()
-
-      try {
-        await Promise.race([p.promise, t.promise])
-      } finally {
-        clearTimeout(timer)
-      }
-    })
-
-    const results = await Promise.allSettled(promises)
-    const rejectedResults = results.filter(v => v.status === 'rejected')
-
-    return {
-      result: events,
-      errors: rejectedResults.map(v => ({ reason: v.reason, relay: relays[results.indexOf(v)] })),
-      success: events.length > 0 || results.length !== rejectedResults.length
-    }
-  }
-
-  // Send an event to a list of relays
-  async sendEvent (event, relays, timeout = 3000) {
-    const eventToSend = event.meta ? { ...event } : event
-    if (eventToSend.meta) delete eventToSend.meta
-
-    const promises = relays.map(async (url) => {
-      const p = Promise.withResolvers()
-      const t = Promise.withResolvers()
-      const timer = maybeUnref(setTimeout(() => {
-        t.reject(new Error(`timeout: ${url}`))
-      }, timeout))
-
-      ;(async () => {
-        try {
-          const relay = await this.#getRelay(url)
-          await relay.publish(eventToSend)
-          p.resolve()
-        } catch (err) {
-          if (err.message?.startsWith('duplicate:')) return p.resolve()
-          if (err.message?.startsWith('mute:')) {
-            console.info(`${url} - ${err.message}`)
-            return p.resolve()
-          }
-          p.reject(err)
-        }
-      })()
-
-      try {
-        await Promise.race([p.promise, t.promise])
-      } finally {
-        clearTimeout(timer)
-      }
-    })
-
-    const results = await Promise.allSettled(promises)
-    const rejectedResults = results.filter(v => v.status === 'rejected')
-
-    return {
-      result: null,
-      errors: rejectedResults.map(v => ({ reason: v.reason, relay: relays[results.indexOf(v)] })),
-      success: results.length !== rejectedResults.length
-    }
-  }
+// sendEvent returns quickly after the first successful publish. Upload flows
+// need the terminal per-relay report so retries and replication stay correct.
+export async function sendEventReport (event, relays, options) {
+  const result = await relayPool.sendEvent(event, relays, options)
+  return await (result?.promise ?? result)
 }
 
-// Share same connection
-// Connections aren't authenticated, thus no need to split by authed user
-export default new NostrRelays()
+export default relayPool

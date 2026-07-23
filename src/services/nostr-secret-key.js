@@ -1,4 +1,4 @@
-import { getPublicKey } from 'nostr-tools/pure'
+import { getPublicKey } from 'libp2r2p/key'
 import { base16ToBytes } from 'libp2r2p/base16'
 import { nsecDecode } from 'libp2r2p/nip19'
 import { parseBunkerSessionUrl } from '#services/bunker-url.js'

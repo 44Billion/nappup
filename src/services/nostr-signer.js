@@ -1,17 +1,11 @@
-import { getPublicKey } from 'nostr-tools/pure'
-import { getConversationKey, encrypt, decrypt } from 'nostr-tools/nip44'
-import nostrRelays, { seedRelays, freeRelays } from '#services/nostr-relays.js'
+import { finalizeEvent } from 'libp2r2p/event'
+import { generateSecretKey, getPublicKey } from 'libp2r2p/key'
+import * as nip44 from 'libp2r2p/nip44'
+import { seedRelays, freeRelays, sendEventReport } from '#services/nostr-relays.js'
 import { getRelays } from '#helpers/signer.js'
 import { bytesToBase16, base16ToBytes } from '#helpers/base16.js'
-import { finalizeEvent } from '#helpers/nip01.js'
 import { nsecDecode, nsecEncode } from 'libp2r2p/nip19'
 import { ensureDotenvInitialized, setEncryptedDotenvValue } from '#services/dotenv.js'
-
-const nip44 = {
-  getConversationKey,
-  encrypt,
-  decrypt
-}
 
 const createToken = Symbol('createToken')
 
@@ -42,9 +36,8 @@ export default class NostrSigner {
       skBytes = base16ToBytes(envSk)
     } else {
       isNewSk = true
-      sk = generateSecretKey()
-      setEncryptedDotenvValue('NOSTR_SECRET_KEY', nsecEncode(sk))
-      skBytes = base16ToBytes(sk)
+      skBytes = generateSecretKey()
+      setEncryptedDotenvValue('NOSTR_SECRET_KEY', nsecEncode(bytesToBase16(skBytes)))
     }
     const ret = new this(createToken, skBytes)
     if (isNewSk) await ret.#initSk(sk)
@@ -65,7 +58,7 @@ export default class NostrSigner {
       content: '',
       created_at: Math.floor(Date.now() / 1000)
     })
-    await nostrRelays.sendEvent(relayList, [...new Set([...seedRelays, ...relays].map(r => r.trim().replace(/\/$/, '')))])
+    await sendEventReport(relayList, [...new Set([...seedRelays, ...relays].map(r => r.trim().replace(/\/$/, '')))])
 
     const profile = await this.signEvent({
       kind: 0,
@@ -77,7 +70,7 @@ export default class NostrSigner {
       }),
       created_at: Math.floor(Date.now() / 1000)
     })
-    await nostrRelays.sendEvent(profile, relays)
+    await sendEventReport(profile, relays)
   }
 
   // hex
@@ -100,21 +93,11 @@ export default class NostrSigner {
 
   nip44Encrypt (pubkey, plaintext) {
     const conversationKey = nip44.getConversationKey(this.#secretKey, pubkey)
-    return nip44.encrypt(conversationKey, plaintext)
+    return nip44.encrypt(plaintext, conversationKey)
   }
 
   nip44Decrypt (pubkey, ciphertext) {
     const conversationKey = nip44.getConversationKey(this.#secretKey, pubkey)
-    return nip44.decrypt(conversationKey, ciphertext)
+    return nip44.decrypt(ciphertext, conversationKey)
   }
-}
-
-function generateSecretKey () {
-  const randomBytes = crypto.getRandomValues(new Uint8Array(40))
-  const B256 = 2n ** 256n // secp256k1 is short weierstrass curve
-  const N = B256 - 0x14551231950b75fc4402da1732fc9bebfn // curve (group) order
-  const bytesToNumber = b => BigInt('0x' + (bytesToBase16(b) || '0'))
-  const mod = (a, b) => { const r = a % b; return r >= 0n ? r : b + r } // mod division
-  const num = mod(bytesToNumber(randomBytes), N - 1n) + 1n // takes at least n+8 bytes
-  return num.toString(16).padStart(64, '0')
 }

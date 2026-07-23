@@ -187,7 +187,7 @@ export async function uploadSiteManifest ({
     authors: [await signer.getPublicKey()],
     '#d': [dTag],
     limit: 1
-  }, relays)).result
+  }, relays, { timeoutAfterFirstEose: null })).result
   events.sort(newestFirst)
   const previous = events[0]
   const tags = buildManifestTags({

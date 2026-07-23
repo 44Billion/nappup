@@ -1,4 +1,4 @@
-import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
+import nostrRelays, { nappRelays, sendEventReport } from '#services/nostr-relays.js'
 import NMMR from 'nmmr'
 import { decode as base93Decode, encode as base93Encode } from 'libp2r2p/base93'
 import { stringifyEvent } from '#helpers/event.js'
@@ -137,7 +137,7 @@ export async function throttledSendEvent (event, relays, {
   if (pause && leadingPause) await new Promise(resolve => setTimeout(resolve, pause))
   if (retries > 0) log(`Retrying upload to ${relays.length} relays: ${relays.join(', ')}`)
 
-  const { errors } = (await nostrRelays.sendEvent(event, relays, 15000))
+  const { errors } = await sendEventReport(event, relays, { timeout: 15000, timeoutUntilFirstFulfillment: null })
   if (errors.length === 0) {
     if (pause && trailingPause) await new Promise(resolve => setTimeout(resolve, pause))
     return { pause }
@@ -147,8 +147,7 @@ export async function throttledSendEvent (event, relays, {
     errors.reduce((r, v) => {
       const message = v.reason?.message ?? ''
       if (message.startsWith('rate-limited:')) r[0].push(v)
-      // https://github.com/nbd-wtf/nostr-tools/blob/28f7553187d201088c8a1009365db4ecbe03e568/abstract-relay.ts#L311
-      else if (message === 'publish timed out') r[1].push(v)
+      else if (message === 'PUBLISH_TIMEOUT') r[1].push(v)
       else r[2].push(v)
       return r
     }, [[], [], []])
@@ -158,7 +157,7 @@ export async function throttledSendEvent (event, relays, {
     const timedOutRelays = maybeUnretryableErrors.map(v => v.relay)
     log(`${maybeUnretryableErrors.length} timeout errors, retrying once after ${pause}ms:\n${maybeUnretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
     if (pause) await new Promise(resolve => setTimeout(resolve, pause))
-    const { errors: timeoutRetryErrors } = await nostrRelays.sendEvent(event, timedOutRelays, 15000)
+    const { errors: timeoutRetryErrors } = await sendEventReport(event, timedOutRelays, { timeout: 15000, timeoutUntilFirstFulfillment: null })
     unretryableErrors.push(...timeoutRetryErrors)
   }
 
@@ -204,7 +203,7 @@ export async function getPreviousChunks (dTagValues, relays, signer) {
       authors: [pubkey],
       '#d': batch,
       limit: batch.length
-    }, targetRelays)).result
+    }, targetRelays, { timeoutAfterFirstEose: null })).result
 
     for (const event of storedEvents) {
       const dTag = event.tags?.find(tag => tag[0] === 'd')?.[1]

@@ -1,41 +1,30 @@
 import assert from 'node:assert/strict'
-import { describe, it, before, after } from 'node:test'
-import { NostrRelays, freeRelays } from '#services/nostr-relays.js'
-import NostrSigner from '#services/nostr-signer.js'
+import { test } from 'node:test'
+import { relayPool } from 'libp2r2p/relay'
 
-describe('relays', () => {
-  let relays
+import relays, { freeRelays, nappRelays, seedRelays, sendEventReport } from '#services/nostr-relays.js'
 
-  before(() => {
-    relays = new NostrRelays()
-  })
+test('uses the shared libp2r2p relay pool and keeps local relay lists', () => {
+  assert.equal(relays, relayPool)
+  assert.ok(freeRelays.length > 0)
+  assert.ok(seedRelays.length > 0)
+  assert.deepEqual(nappRelays, ['wss://relay.44billion.net'])
+})
 
-  after(() => {
-    // Close any open connections
-    relays.disconnectAll()
-  })
+test('sendEventReport waits for the terminal per-relay report', async t => {
+  let finish
+  const report = new Promise(resolve => { finish = resolve })
+  t.mock.method(relayPool, 'sendEvent', async () => ({
+    success: true,
+    promise: report
+  }))
 
-  it('should get events from a relay', async () => {
-    const events = (await relays.getEvents({ kinds: [1], limit: 2 }, freeRelays.slice(0, 1))).result
-    assert.ok(Array.isArray(events))
-  })
+  const pending = sendEventReport({ id: 'event' }, ['wss://relay.example'])
+  let settled = false
+  pending.then(() => { settled = true })
+  await Promise.resolve()
+  assert.equal(settled, false)
 
-  it('should send an event to a relay', async () => {
-    const nostrSigner = await NostrSigner.create('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2')
-    const event = {
-      kind: 1,
-      content: `test ${Math.random()}`,
-      tags: [],
-      created_at: Math.floor(Date.now() / 1000),
-      pubkey: nostrSigner.getPublicKey()
-    }
-    const signedEvent = nostrSigner.signEvent(event)
-    await relays.sendEvent(signedEvent, freeRelays.slice(0, 1))
-    await new Promise(resolve => setTimeout(resolve, 1000)) // wait for the event to propagate
-    const [signedEventCopy] = (await relays.getEvents({ ids: [signedEvent.id], limit: 1 }, freeRelays.slice(0, 1))).result
-    assert.deepEqual(
-      (({ id, kind, pubkey, tags, content, created_at, sig }) => ({ id, kind, pubkey, tags, content, created_at, sig }))(signedEvent),
-      (({ id, kind, pubkey, tags, content, created_at, sig }) => ({ id, kind, pubkey, tags, content, created_at, sig }))(signedEventCopy)
-    )
-  })
+  finish({ success: true, fulfilled: 1, errors: [] })
+  assert.deepEqual(await pending, { success: true, fulfilled: 1, errors: [] })
 })

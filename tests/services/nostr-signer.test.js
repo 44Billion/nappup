@@ -16,4 +16,11 @@ describe('NostrSigner', () => {
     const signer = await NostrSigner.create(nsec)
     assert.ok(signer)
   })
+
+  it('uses the public NIP-44 plaintext/ciphertext argument order', async () => {
+    const alice = await NostrSigner.create('a0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5')
+    const bob = await NostrSigner.create('b0a810b0fa6499358355d353884e5633c1a237c81e58044c531639590817dfa5')
+    const ciphertext = alice.nip44Encrypt(bob.getPublicKey(), 'hello')
+    assert.equal(bob.nip44Decrypt(alice.getPublicKey(), ciphertext), 'hello')
+  })
 })
