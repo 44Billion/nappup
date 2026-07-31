@@ -1,10 +1,12 @@
 import { NAPP_CATEGORIES } from '#config/napp-categories.js'
 import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
 import { throttledSendEvent } from '#services/irfs-upload.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToBase16 } from '#helpers/base16.js'
 
 const MANAGED_MANIFEST_TAGS = new Set([
   'd', 'service', 'path', 'r', 'name', 'summary', 'description', 'self',
-  'c', 'l', 't', 'auto', 'icon', 'key_art', 'screenshot'
+  'c', 'l', 't', 'auto', 'icon', 'key_art', 'screenshot', 'x', 'published_at'
 ])
 
 export function normalizeManifestPath (value) {
@@ -23,6 +25,37 @@ export function normalizeManifestPath (value) {
 
 function validRoot (root) {
   return typeof root === 'string' && /^[0-9a-f]{64}$/.test(root)
+}
+
+function manifestAggregateLines (manifest) {
+  const tags = Array.isArray(manifest?.tags) ? manifest.tags : []
+  const service = tags.find(tag => Array.isArray(tag) && tag[0] === 'service')?.[1]
+  const lines = []
+
+  if (service === 'irfs') {
+    for (const tag of tags) {
+      if (!Array.isArray(tag) || tag[0] !== 'r' || !validRoot(tag[1])) continue
+      for (const field of tag.slice(2)) {
+        if (typeof field !== 'string' || !field.startsWith('path ')) continue
+        const path = normalizeManifestPath(field.slice(5))
+        lines.push(`${tag[1]} /${path}\n`)
+      }
+    }
+  } else {
+    for (const tag of tags) {
+      if (!Array.isArray(tag) || tag[0] !== 'path' || !validRoot(tag[2])) continue
+      const path = normalizeManifestPath(tag[1])
+      lines.push(`${tag[2]} /${path}\n`)
+    }
+  }
+
+  return lines
+}
+
+export function getManifestAggregateHash (manifest) {
+  const lines = manifestAggregateLines(manifest)
+  if (!lines.length) throw new Error('Site manifest must reference at least one file')
+  return bytesToBase16(sha256(new TextEncoder().encode(lines.sort().join(''))))
 }
 
 function decimalSize (size) {
@@ -138,7 +171,7 @@ function buildMetadataTags ({
 
 export function buildManifestTags ({
   dTag, uploadService, fileMetadata = [], icon, keyArt = [], screenshots = [],
-  previousTags = [], ...metadata
+  previousTags = [], publishedAt, ...metadata
 }) {
   if (uploadService !== 'irfs' && uploadService !== 'blossom') {
     throw new Error('Unknown upload service')
@@ -153,10 +186,21 @@ export function buildManifestTags ({
     .slice(0, 10)
     .map(tag => [...tag])
 
+  if (!Number.isSafeInteger(publishedAt) || publishedAt < 0) {
+    throw new Error('published_at must be a non-negative safe integer')
+  }
+
+  const referenceTags = buildReferenceTags(uploadService, fileMetadata, media)
+  const aggregateHash = getManifestAggregateHash({
+    tags: [...referenceTags, ['service', uploadService]]
+  })
+
   return [
     ['d', dTag],
-    ...buildReferenceTags(uploadService, fileMetadata, media),
+    ...referenceTags,
     ['service', uploadService],
+    ['x', aggregateHash, 'aggregate'],
+    ['published_at', String(publishedAt)],
     ...buildMetadataTags({ ...metadata, hasIcon: Boolean(icon) }),
     ...unknownTags
   ]
@@ -190,8 +234,34 @@ export async function uploadSiteManifest ({
   }, relays, { timeoutAfterFirstEose: null })).result
   events.sort(newestFirst)
   const previous = events[0]
+
+  const now = Math.floor(Date.now() / 1000)
+  const createdAt = Math.max(now, (previous?.created_at ?? -1) + 1)
+  if (createdAt > now + 172800) throw new Error('Existing manifest timestamp is too far in the future to replace safely')
+
+  const prospectiveTags = buildManifestTags({
+    dTag, uploadService, fileMetadata, previousTags: previous?.tags,
+    publishedAt: createdAt, ...metadata
+  })
+  const aggregateHash = getManifestAggregateHash({ tags: prospectiveTags })
+  let previousAggregateHash = null
+  try {
+    if (previous) previousAggregateHash = getManifestAggregateHash(previous)
+  } catch (_) {}
+  const isSameVersion = previousAggregateHash === aggregateHash
+  const previousPublishedAt = previous?.tags?.find(tag => tag[0] === 'published_at')?.[1]
+  const parsedPreviousPublishedAt = typeof previousPublishedAt === 'string' && /^(0|[1-9][0-9]*)$/.test(previousPublishedAt)
+    ? Number(previousPublishedAt)
+    : null
+  const fallbackPublishedAt = Number.isSafeInteger(previous?.created_at) && previous.created_at >= 0
+    ? previous.created_at
+    : createdAt
+  const publishedAt = isSameVersion && Number.isSafeInteger(parsedPreviousPublishedAt)
+    ? parsedPreviousPublishedAt
+    : (isSameVersion ? fallbackPublishedAt : createdAt)
   const tags = buildManifestTags({
-    dTag, uploadService, fileMetadata, previousTags: previous?.tags, ...metadata
+    dTag, uploadService, fileMetadata, previousTags: previous?.tags,
+    publishedAt, ...metadata
   })
 
   if (!shouldReupload && previous && previous.content === '' && JSON.stringify(previous.tags) === JSON.stringify(tags)) {
@@ -208,9 +278,6 @@ export async function uploadSiteManifest ({
     return previous
   }
 
-  const now = Math.floor(Date.now() / 1000)
-  const createdAt = Math.max(now, (previous?.created_at ?? -1) + 1)
-  if (createdAt > now + 172800) throw new Error('Existing manifest timestamp is too far in the future to replace safely')
   const event = await signer.signEvent({ kind, tags, content: '', created_at: createdAt })
   await throttledSendEvent(event, relays, { pause, trailingPause: true, log })
   return event

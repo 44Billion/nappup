@@ -29,7 +29,7 @@ nappup [directory] [options]
 | `-s <secret_key>` | Your Nostr secret key (hex, nsec, or `bunker://` URL) used to sign the application event. See [Authentication](#authentication) for alternatives. |
 | `-d <d_tag>` | The identifier (`d` tag) for your application. Any UTF-8 text up to 260 characters. If omitted, defaults to the directory name. Avoid generic names like `dist` or `build` - use something unique among your other apps like `mycoolapp`. |
 | `-y` | Skip confirmation prompt. Useful for CI/CD pipelines or automated scripts. |
-| `-r` | Force re-upload. By default, Napp Up! might skip files that haven't changed. Use this flag to ensure everything is pushed fresh. |
+| `-r` | Force re-upload. By default, Napp Up! might skip files that haven't changed. Use this flag to ensure everything is pushed fresh; it does not create a new app version unless a file path or hash changes. |
 | `--main` | Publish to the **main** release channel. This is the default behavior. |
 | `--next` | Publish to the **next** release channel. Ideal for beta testing or staging builds. |
 | `--draft` | Publish to the **draft** release channel. Use this for internal testing or work-in-progress builds. |
@@ -112,6 +112,13 @@ nappup ~/my-repos/projectx/build/projectx --draft -r
 ```
 
 ## Programmatic Usage
+
+Each published manifest includes an aggregate `x` tag that identifies the app
+version from its file path/hash mappings. Updating only manifest metadata or
+forcing a re-upload preserves that aggregate. The `published_at` tag records
+the first publication time of that aggregate and is preserved across later
+metadata revisions, while the event's `created_at` records the latest manifest
+revision.
 
 Napp Up! also exports a function that works in both Node.js and the browser, so you can integrate app uploads directly into your own tooling:
 
