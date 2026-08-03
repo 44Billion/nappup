@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path'
+import { npubEncode } from 'libp2r2p/nip19'
 import { GENERIC_BUILD_FOLDER_NAMES } from '#helpers/app.js'
 import {
   parseArgs,
@@ -57,8 +58,6 @@ async function upload (args, dotenvState) {
   }
   args.dTag = dTag
 
-  await confirmArgs(args)
-  const fileList = await toFileList(getFiles(dir), dir)
   const bunkerUrl = sk?.startsWith('bunker://')
     ? sk
     : !sk && process.env.NOSTR_SECRET_KEY?.startsWith('bunker://')
@@ -73,10 +72,17 @@ async function upload (args, dotenvState) {
     })
   } else {
     const { default: NostrSigner } = await import('#services/nostr-signer.js')
-    signer = await NostrSigner.create(sk)
+    signer = await NostrSigner.create(sk, {
+      deferInitialization: true,
+      dotenvFilePath: dotenvState.filePath
+    })
   }
 
   try {
+    args.npub = npubEncode(await signer.getPublicKey())
+    if (!await confirmArgs(args)) return
+    await signer.initialize?.()
+    const fileList = await toFileList(getFiles(dir), dir)
     const { default: toApp } = await import('#index.js')
     await toApp(fileList, signer, { log: console.log.bind(console), dTag, channel, shouldReupload })
   } finally {

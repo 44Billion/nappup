@@ -1,5 +1,5 @@
 import NMMR from 'nmmr'
-import { appEncode, npubEncode } from 'libp2r2p/nip19'
+import { appEncode } from 'libp2r2p/nip19'
 import nostrRelays from '#services/nostr-relays.js'
 import { getRelays } from '#helpers/signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'
@@ -79,8 +79,7 @@ export async function toApp (fileList, nostrSigner, {
 
   const writeRelays = [...new Set((await nostrSigner.getRelays()).write
     .map(relay => relay.trim().replace(/\/$/, '')))]
-  const npub = npubEncode(await nostrSigner.getPublicKey())
-  log(`Found ${writeRelays.length} outbox relays for pubkey ${npub}:\n${writeRelays.join(', ')}`)
+  log(`Found ${writeRelays.length} outbox relays:\n${writeRelays.join(', ')}`)
   if (!writeRelays.length) throw new Error('No outbox relays found')
 
   if (typeof dTag === 'string') {

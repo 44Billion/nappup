@@ -153,7 +153,7 @@ export async function readEnvSetValue (args, {
 }
 
 export async function confirmArgs (args) {
-  if (args.yes) return
+  if (args.yes) return true
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
@@ -162,14 +162,18 @@ export async function confirmArgs (args) {
     return new Promise(resolve => rl.question(query, resolve))
   }
   const answer = await askQuestion(
-    `Publish app from '${args.dir}' as '${args.dTag}' to the ${args.channel} release channel? (y/n) `
+    confirmationPrompt(args)
   )
+  rl.close()
   if (answer.toLowerCase() !== 'y') {
     console.log('Operation cancelled by user.')
-    rl.close()
-    process.exit(0)
+    return false
   }
-  rl.close()
+  return true
+}
+
+export function confirmationPrompt (args) {
+  return `Publish app from '${args.dir}' as '${args.dTag}' to the ${args.channel} release channel using ${args.npub}? (y/n) `
 }
 
 export async function * getFiles (dir) {

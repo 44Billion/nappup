@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { PassThrough, Readable, Writable } from 'node:stream'
 import { describe, it } from 'node:test'
-import { parseArgs, getFiles, readEnvSetValue } from '#bin/nappup/helpers.js'
+import { confirmationPrompt, parseArgs, getFiles, readEnvSetValue } from '#bin/nappup/helpers.js'
 
 describe('bin/index.js', () => {
   const testDir = path.resolve('tests/fixtures/bin/nappup')
@@ -80,6 +80,20 @@ describe('bin/index.js', () => {
       assert.throws(() => parseArgs(['env', 'set', 'OTHER', 'value']), /Only NOSTR_SECRET_KEY/)
       assert.throws(() => parseArgs(['env', 'set', 'NOSTR_SECRET_KEY', 'one', 'two']), /Expected one/)
     })
+  })
+
+  it('includes the publisher npub in the upload confirmation', () => {
+    const prompt = confirmationPrompt({
+      dir: '/apps/example',
+      dTag: 'example',
+      channel: 'main',
+      npub: 'npub1publisher'
+    })
+
+    assert.equal(
+      prompt,
+      "Publish app from '/apps/example' as 'example' to the main release channel using npub1publisher? (y/n) "
+    )
   })
 
   describe('readEnvSetValue()', () => {

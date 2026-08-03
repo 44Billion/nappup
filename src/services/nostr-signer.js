@@ -12,15 +12,19 @@ const createToken = Symbol('createToken')
 export default class NostrSigner {
   #secretKey // bytes
   #publicKey // hex
+  #needsInitialization
+  #dotenvFilePath
 
-  constructor (token, skBytes) {
+  constructor (token, skBytes, { needsInitialization = false, dotenvFilePath } = {}) {
     if (token !== createToken) throw new Error('Use NostrSigner.create(?sk) to instantiate this class.')
     if (!skBytes) throw new Error('Secret key missing.')
 
     this.#secretKey = skBytes
+    this.#needsInitialization = needsInitialization
+    this.#dotenvFilePath = dotenvFilePath
   }
 
-  static async create (sk) {
+  static async create (sk, { deferInitialization = false, dotenvFilePath } = {}) {
     if (sk) {
       if (sk.startsWith('nsec')) sk = nsecDecode(sk)
       return new this(createToken, base16ToBytes(sk))
@@ -37,11 +41,24 @@ export default class NostrSigner {
     } else {
       isNewSk = true
       skBytes = generateSecretKey()
-      setEncryptedDotenvValue('NOSTR_SECRET_KEY', nsecEncode(bytesToBase16(skBytes)))
     }
-    const ret = new this(createToken, skBytes)
-    if (isNewSk) await ret.#initSk(sk)
+    const ret = new this(createToken, skBytes, {
+      needsInitialization: isNewSk,
+      dotenvFilePath
+    })
+    if (isNewSk && !deferInitialization) await ret.initialize()
     return ret
+  }
+
+  async initialize () {
+    if (!this.#needsInitialization) return
+    setEncryptedDotenvValue(
+      'NOSTR_SECRET_KEY',
+      nsecEncode(bytesToBase16(this.#secretKey)),
+      this.#dotenvFilePath ? { filePath: this.#dotenvFilePath } : undefined
+    )
+    this.#needsInitialization = false
+    await this.#initSk()
   }
 
   async getRelays () {

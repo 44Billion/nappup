@@ -58,7 +58,7 @@ async function setupMocks (t) {
 }
 
 describe('onEvent', () => {
-  it('should log the publisher public key as an npub', async (t) => {
+  it('should log the outbox relays without repeating the publisher key', async (t) => {
     await setupMocks(t)
 
     const logs = []
@@ -70,7 +70,7 @@ describe('onEvent', () => {
     })
 
     const relayLog = logs.find(message => message.startsWith('Found 2 outbox relays'))
-    assert.match(relayLog, /pubkey npub1424242424242424242424242424242424242424242424242424qamrcaj:/)
+    assert.match(relayLog, /^Found 2 outbox relays:\n/)
     assert.equal(relayLog.includes(MOCK_PUBKEY), false)
   })
 
