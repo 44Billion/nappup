@@ -188,10 +188,12 @@ export async function toFileList (filesIterator, dir) {
   const fileList = []
   for await (const f of filesIterator) {
     const fileType = mime.lookup(f)
+    const { size } = await fs.promises.stat(f)
     const file = {
       stream: () => Readable.toWeb(fs.createReadStream(f)),
       webkitRelativePath: path.relative(dir.replace(/\/[^/]*$/, ''), f),
-      type: fileType || (await fileTypeFromFile(f))?.mime || ''
+      type: fileType || (await fileTypeFromFile(f))?.mime || '',
+      size
     }
     fileList.push(file)
   }

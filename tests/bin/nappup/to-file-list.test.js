@@ -15,6 +15,12 @@ describe('toFileList', () => {
 
     const sortedFileList = fileList.sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath))
 
+    assert.deepEqual(
+      sortedFileList.map(file => file.size),
+      [6, 21, 8, 0],
+      'Should include each file size in bytes'
+    )
+
     // Verify file1 properties
     assert.equal(
       sortedFileList[0].webkitRelativePath,

@@ -58,6 +58,22 @@ async function setupMocks (t) {
 }
 
 describe('onEvent', () => {
+  it('should log the publisher public key as an npub', async (t) => {
+    await setupMocks(t)
+
+    const logs = []
+    const fileList = [createFakeFile('<html></html>', 'myapp/index.html')]
+
+    await toApp(fileList, createMockSigner(), {
+      dTag: 'myapp',
+      log: message => logs.push(message)
+    })
+
+    const relayLog = logs.find(message => message.startsWith('Found 2 outbox relays'))
+    assert.match(relayLog, /pubkey npub1424242424242424242424242424242424242424242424242424qamrcaj:/)
+    assert.equal(relayLog.includes(MOCK_PUBKEY), false)
+  })
+
   it('should emit init, file-uploaded, manifest-published, complete for a single file', async (t) => {
     await setupMocks(t)
 
