@@ -1,19 +1,5 @@
 import { relayPool } from 'libp2r2p/relay'
-
-export const seedRelays = [
-  'wss://relay.44billion.net',
-  'wss://purplepag.es',
-  'wss://user.kindpag.es',
-  'wss://relay.nos.social',
-  'wss://nostr.land',
-  'wss://indexer.coracle.social'
-]
-export const freeRelays = [
-  'wss://relay.primal.net',
-  'wss://nos.lol',
-  'wss://relay.damus.io'
-]
-export const nappRelays = ['wss://relay.44billion.net']
+export { freeRelays, nappRelays, seedRelays } from 'libp2r2p/relay'
 
 // sendEvent returns quickly after the first successful publish. Upload flows
 // need the terminal per-relay report so retries and replication stay correct.

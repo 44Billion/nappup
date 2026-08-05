@@ -4,7 +4,7 @@ import nostrRelays from '#services/nostr-relays.js'
 import { getRelays } from '#helpers/signer.js'
 import { streamToChunks, streamToText } from '#helpers/stream.js'
 import { isNostrAppDTagSafe, GENERIC_BUILD_FOLDER_NAMES } from '#helpers/app.js'
-import { extractHtmlMetadata, findFavicon, findIndexFile } from '#helpers/app-metadata.js'
+import { extractHtmlMetadata, findAppIcon, findIndexFile } from '#helpers/app-metadata.js'
 import { getBlossomServers, healthCheckServers, uploadFilesToBlossom } from '#services/blossom-upload.js'
 import { uploadBinaryDataChunks } from '#services/irfs-upload.js'
 import { uploadSiteManifest } from '#services/site-manifest.js'
@@ -110,9 +110,11 @@ export async function toApp (fileList, nostrSigner, {
   const indexFile = findIndexFile(fileList)
   let manifestName = nappJson.name?.[0]?.[0]
   let manifestSummary = nappJson.summary?.[0]?.[0]
-  if (indexFile && (!manifestName || !manifestSummary)) {
+  let indexHtml = ''
+  if (indexFile) {
     try {
-      const { name, description } = extractHtmlMetadata(await streamToText(indexFile.stream()))
+      indexHtml = await streamToText(indexFile.stream())
+      const { name, description } = extractHtmlMetadata(indexHtml)
       if (!manifestName) manifestName = name
       if (!manifestSummary) manifestSummary = description
     } catch (error) {
@@ -120,7 +122,7 @@ export async function toApp (fileList, nostrSigner, {
     }
   }
 
-  const faviconFile = findFavicon(fileList)
+  const faviconFile = await findAppIcon(fileList, indexHtml, indexFile, file => streamToText(file.stream()))
   let iconMetadata
   let pause = 1000
 

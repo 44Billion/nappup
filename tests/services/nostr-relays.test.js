@@ -1,14 +1,24 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { relayPool } from 'libp2r2p/relay'
+import {
+  freeRelays as sharedFreeRelays,
+  nappRelays as sharedNappRelays,
+  relayPool,
+  seedRelays as sharedSeedRelays
+} from 'libp2r2p/relay'
 
 import relays, { freeRelays, nappRelays, seedRelays, sendEventReport } from '#services/nostr-relays.js'
 
-test('uses the shared libp2r2p relay pool and keeps local relay lists', () => {
+test('uses the shared libp2r2p relay pool and relay lists', () => {
   assert.equal(relays, relayPool)
-  assert.ok(freeRelays.length > 0)
-  assert.ok(seedRelays.length > 0)
-  assert.deepEqual(nappRelays, ['wss://relay.44billion.net'])
+  assert.equal(freeRelays, sharedFreeRelays)
+  assert.equal(seedRelays, sharedSeedRelays)
+  assert.equal(nappRelays, sharedNappRelays)
+  assert.deepEqual(nappRelays, [
+    'wss://relay.44billion.net',
+    'wss://relay.ditto.pub',
+    'wss://relay.dreamith.to'
+  ])
 })
 
 test('sendEventReport waits for the terminal per-relay report', async t => {
