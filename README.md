@@ -138,3 +138,20 @@ await publishApp(fileList, signer, {
 - **`fileList`** — a `FileList` or array of `File` objects (each needs `webkitRelativePath`).
 - **`signer`** — a [NIP-07](https://github.com/nostr-protocol/nips/blob/master/07.md)-compatible signer. In the browser, `window.nostr` is used automatically if omitted.
 - **`onEvent`** — optional callback that receives progress events with a `type` (`'init'`, `'file-uploaded'`, `'complete'`, `'error'`, …) and `progress` (0–100).
+
+Rejected uploads use `NappupError`, with a stable code from
+`NAPPUP_ERROR_CODES`. The original error is retained as `cause`, and some
+errors include structured `details`, so applications can show their own
+recovery instructions without matching CLI-oriented message text:
+
+```js
+import publishApp, { NAPPUP_ERROR_CODES } from 'nappup'
+
+try {
+  await publishApp(fileList, signer)
+} catch (error) {
+  if (error.code === NAPPUP_ERROR_CODES.GENERIC_FOLDER_NAME) {
+    // Ask the user to choose a unique app folder name.
+  }
+}
+```

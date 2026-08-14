@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { toApp } from '../src/index.js'
+import { NAPPUP_ERROR_CODES, toApp } from '../src/index.js'
 
 const MOCK_PUBKEY = 'a'.repeat(64)
 const MOCK_EVENT_ID = 'b'.repeat(64)
@@ -214,6 +214,9 @@ describe('onEvent', () => {
     )
     const complete = events.find(e => e.type === 'complete')
     assert.equal(complete, undefined, 'should not emit complete on error')
+    const error = events.find(e => e.type === 'error')
+    assert.equal(error.error.code, NAPPUP_ERROR_CODES.NO_SIGNER)
+    assert.equal(error.progress, 0)
   })
 
   it('should not break publishing if onEvent callback throws', async (t) => {

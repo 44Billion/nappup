@@ -5,5 +5,5 @@ export const GENERIC_BUILD_FOLDER_NAMES = new Set([
 ])
 
 export function isNostrAppDTagSafe (string) {
-  return typeof string === 'string' && string.length <= NOSTR_APP_D_TAG_MAX_LENGTH
+  return typeof string === 'string' && string.length > 0 && string.length <= NOSTR_APP_D_TAG_MAX_LENGTH
 }
