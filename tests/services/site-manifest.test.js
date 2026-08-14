@@ -47,6 +47,19 @@ describe('unified site manifest', () => {
     assert.ok(tags.some(tag => tag[0] === 'r' && tag.includes('mark icon')))
   })
 
+  it('publishes normalized relay and Blossom source hints', () => {
+    const tags = buildManifestTags({
+      dTag: 'app', uploadService: 'blossom', publishedAt: 123,
+      fileMetadata: [{ rootHash: ROOT_A, filename: 'index.html', size: 12 }],
+      sourceRelays: ['wss://relay.test/', 'wss://relay.test', 'ftp://invalid.test'],
+      blossomServers: ['https://blossom.test/', 'ftp://invalid.test']
+    })
+    assert.deepEqual(tags.filter(tag => tag[0] === 'relay' || tag[0] === 'server'), [
+      ['relay', 'wss://relay.test'],
+      ['server', 'https://blossom.test']
+    ])
+  })
+
   it('preserves only the first ten unknown tags in order', () => {
     const previousTags = [
       ['old-a', '0'], ['name', 'old'],

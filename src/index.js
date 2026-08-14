@@ -124,6 +124,7 @@ export async function toApp (fileList, nostrSigner, {
 
   const faviconFile = await findAppIcon(fileList, indexHtml, indexFile, file => streamToText(file.stream()))
   let iconMetadata
+  let isExplicitIcon = false
   let pause = 1000
 
   log('Checking for blossom servers...')
@@ -182,6 +183,7 @@ export async function toApp (fileList, nostrSigner, {
     try {
       log('Uploading icon from napp.json')
       iconMetadata = await uploadMediaFromDataUrl(nappJson.icon[0][0], 'icon')
+      isExplicitIcon = Boolean(iconMetadata)
     } catch (error) {
       log('Failed to upload icon from napp.json', error)
     }
@@ -246,7 +248,7 @@ export async function toApp (fileList, nostrSigner, {
         size: uploaded.size
       }
       fileMetadata.push(metadata)
-      if (faviconFile && uploaded.file === faviconFile) iconMetadata = { ...metadata }
+      if (!iconMetadata && faviconFile && uploaded.file === faviconFile) iconMetadata = { ...metadata }
       steps++
       emit({ type: 'file-uploaded', filename: uploaded.filename, service: 'blossom' })
     }
@@ -277,7 +279,7 @@ export async function toApp (fileList, nostrSigner, {
         size: file.size
       }
       fileMetadata.push(metadata)
-      if (faviconFile && file === faviconFile) iconMetadata = { ...metadata }
+      if (!iconMetadata && faviconFile && file === faviconFile) iconMetadata = { ...metadata }
       steps++
       emit({ type: 'file-uploaded', filename, service: 'irfs' })
     }
@@ -295,11 +297,13 @@ export async function toApp (fileList, nostrSigner, {
     summaryLang: nappJson.summary?.[0]?.[1],
     isSummaryAuto: !nappJson.summary?.[0]?.[0],
     icon: iconMetadata,
-    isIconAuto: !nappJson.icon?.[0]?.[0],
+    isIconAuto: !isExplicitIcon,
     descriptions: nappJson.description,
     keyArt: keyArtMetadata,
     screenshots: screenshotMetadata,
     uploadService,
+    sourceRelays: writeRelays,
+    blossomServers: healthyBlossomServers,
     signer: nostrSigner,
     log,
     pause,
@@ -313,6 +317,7 @@ export async function toApp (fileList, nostrSigner, {
   const appEntity = appEncode({
     dTag: manifest.tags.find(tag => tag[0] === 'd')[1],
     pubkey: manifest.pubkey,
+    // Keep empty array to generate the shorter app entity.
     relays: [],
     kind: manifest.kind
   })

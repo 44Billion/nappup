@@ -1,11 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import nostrRelays from '#services/nostr-relays.js'
 import { bytesToBase16 } from '#helpers/base16.js'
-
-function normalizeServerUrl (url) {
-  if (!url.startsWith('http')) url = 'https://' + url
-  return url.replace(/\/$/, '') + '/'
-}
+import { normalizeBlossomServerUrl } from 'libp2r2p/url'
 
 async function createAuthHeader (signer, modify) {
   const now = Math.floor(Date.now() / 1000)
@@ -37,10 +33,11 @@ export async function getBlossomServers (signer, writeRelays) {
   events.sort((a, b) => b.created_at - a.created_at)
   const best = events[0]
 
-  return (best.tags ?? [])
-    .filter(t => Array.isArray(t) && t[0] === 'server' && /^https?:\/\//.test(t[1]))
-    .map(t => t[1].trim().replace(/\/$/, ''))
-    .filter(Boolean)
+  return [...new Set((best.tags ?? [])
+    .filter(t => Array.isArray(t) && t[0] === 'server')
+    .flatMap(tag => {
+      try { return [normalizeBlossomServerUrl(tag[1])] } catch (_) { return [] }
+    }))]
 }
 
 /**
@@ -51,8 +48,9 @@ export async function getBlossomServers (signer, writeRelays) {
 export async function healthCheckServers (servers, signer, { log = () => {} } = {}) {
   const results = await Promise.allSettled(
     servers.map(async (serverUrl) => {
-      await fetch(normalizeServerUrl(serverUrl), { method: 'HEAD' })
-      return serverUrl
+      const normalized = normalizeBlossomServerUrl(serverUrl)
+      await fetch(normalized, { method: 'HEAD' })
+      return normalized
     })
   )
 
@@ -88,7 +86,7 @@ export async function computeFileHash (file) {
 async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, { shouldReupload, log, maxRetries = 5 }) {
   // Check if already uploaded
   if (!shouldReupload) {
-    const checkResponse = await fetch(serverUrl + fileHash, { method: 'HEAD' })
+    const checkResponse = await fetch(`${serverUrl}/${fileHash}`, { method: 'HEAD' })
     if (checkResponse.ok) {
       return { success: true, alreadyExists: true }
     }
@@ -106,7 +104,7 @@ async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, 
         evt.tags.push(['t', 'upload'])
         evt.tags.push(['x', fileHash])
       })
-      const response = await fetch(serverUrl + 'upload', {
+      const response = await fetch(`${serverUrl}/upload`, {
         method: 'PUT',
         headers: { 'Content-Type': mimeType, Authorization: authorization },
         body: file.stream(),
@@ -145,7 +143,12 @@ export async function uploadFilesToBlossom ({
   maxRetries = 5,
   log = () => {}
 }) {
-  if (servers.length === 0) return { uploadedFiles: [], failedFiles: [...fileList.map(f => ({ file: f }))] }
+  const normalizedServers = [...new Set(servers.flatMap(server => {
+    try { return [normalizeBlossomServerUrl(server)] } catch (_) { return [] }
+  }))]
+  if (normalizedServers.length === 0) {
+    return { uploadedFiles: [], failedFiles: [...fileList.map(f => ({ file: f }))] }
+  }
 
   // Pre-compute file info
   const fileInfos = await Promise.all(
@@ -161,24 +164,22 @@ export async function uploadFilesToBlossom ({
   const fileServerResults = fileInfos.map(() => ({ successCount: 0, errors: [] }))
 
   // Upload to each server in parallel, but within a server, upload files sequentially
-  const serverTasks = servers.map(async (server) => {
-    const serverUrl = normalizeServerUrl(server)
-
+  const serverTasks = normalizedServers.map(async (serverUrl) => {
     for (let i = 0; i < fileInfos.length; i++) {
       const info = fileInfos[i]
-      log(`Uploading ${info.filename} to ${server}`)
+      log(`Uploading ${info.filename} to ${serverUrl}`)
       const result = await uploadFileToServer(serverUrl, signer, info.file, info.sha256, info.mimeType, { shouldReupload, log, maxRetries })
 
       if (result.success) {
         fileServerResults[i].successCount++
         if (result.alreadyExists) {
-          log(`${info.filename}: Already exists on ${server}`)
+          log(`${info.filename}: Already exists on ${serverUrl}`)
         } else {
-          log(`${info.filename}: Uploaded to ${server}`)
+          log(`${info.filename}: Uploaded to ${serverUrl}`)
         }
       } else {
-        fileServerResults[i].errors.push({ server, error: result.error })
-        log(`${info.filename}: Failed to upload to ${server}: ${result.error?.message ?? result.error}`)
+        fileServerResults[i].errors.push({ server: serverUrl, error: result.error })
+        log(`${info.filename}: Failed to upload to ${serverUrl}: ${result.error?.message ?? result.error}`)
       }
     }
   })

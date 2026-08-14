@@ -1,4 +1,5 @@
 const IMAGE_EXTENSIONS = /\.(?:ico|svg|webp|png|jpe?g|gif|avif)(?:[?#].*)?$/i
+const CONVENTIONAL_ICON_BASENAME = /^(?:favicon(?:[-_.]\w+)*|apple-touch-icon(?:-precomposed|[-_.]\w+)*)\.(?:ico|svg|webp|png|jpe?g|gif|avif)$/i
 
 // Decodes the character references commonly used in metadata attributes.
 function decodeHtml (value) {
@@ -55,11 +56,11 @@ function scanTags (htmlContent, names) {
 }
 
 // Adds a unique icon source with a stable priority and document order.
-function addIconSource (sources, seen, href, kind, priority, index) {
+function addIconSource (sources, seen, href, kind, priority, index, { sizes, type } = {}) {
   const value = typeof href === 'string' ? href.trim() : ''
   if (!value || seen.has(value)) return
   seen.add(value)
-  sources.push({ href: value, kind, priority, index })
+  sources.push({ href: value, kind, priority, index, sizes, type })
 }
 
 function metadataMarkup (htmlContent) {
@@ -88,10 +89,11 @@ export function extractHtmlMetadata (htmlContent) {
       }
       if (tagName === 'link') {
         const rels = new Set((attributes.rel || '').toLowerCase().split(/\s+/).filter(Boolean))
-        if (rels.has('icon')) addIconSource(iconSources, seenIcons, attributes.href, 'icon', 10, index)
-        else if (rels.has('apple-touch-icon')) addIconSource(iconSources, seenIcons, attributes.href, 'apple-touch-icon', 20, index)
-        else if (rels.has('apple-touch-icon-precomposed')) addIconSource(iconSources, seenIcons, attributes.href, 'apple-touch-icon', 21, index)
-        else if (rels.has('mask-icon') || rels.has('fluid-icon')) addIconSource(iconSources, seenIcons, attributes.href, 'mask-icon', 30, index)
+        const iconAttributes = { sizes: attributes.sizes, type: attributes.type }
+        if (rels.has('icon')) addIconSource(iconSources, seenIcons, attributes.href, 'icon', 10, index, iconAttributes)
+        else if (rels.has('apple-touch-icon')) addIconSource(iconSources, seenIcons, attributes.href, 'apple-touch-icon', 20, index, iconAttributes)
+        else if (rels.has('apple-touch-icon-precomposed')) addIconSource(iconSources, seenIcons, attributes.href, 'apple-touch-icon', 21, index, iconAttributes)
+        else if (rels.has('mask-icon') || rels.has('fluid-icon')) addIconSource(iconSources, seenIcons, attributes.href, 'mask-icon', 30, index, iconAttributes)
         else if (rels.has('manifest')) addIconSource(iconSources, seenIcons, attributes.href, 'manifest', 40, index)
         else if (rels.has('image_src')) addIconSource(iconSources, seenIcons, attributes.href, 'social-image', 70, index)
         continue
@@ -127,7 +129,12 @@ export function extractHtmlMetadata (htmlContent) {
     name,
     description,
     baseHref,
-    iconSources: iconSources.map(({ href, kind }) => ({ href, kind }))
+    iconSources: iconSources.map(({ href, kind, sizes, type }) => ({
+      href,
+      kind,
+      ...(sizes ? { sizes } : {}),
+      ...(type ? { type } : {})
+    }))
   }
 }
 
@@ -139,6 +146,8 @@ export function extractWebManifestIcons (manifest) {
       .map((icon, index) => ({
         href: typeof icon?.src === 'string' ? icon.src.trim() : '',
         kind: 'web-app-manifest',
+        sizes: typeof icon?.sizes === 'string' ? icon.sizes : undefined,
+        type: typeof icon?.type === 'string' ? icon.type : undefined,
         purpose: typeof icon?.purpose === 'string' ? icon.purpose.toLowerCase().split(/\s+/) : ['any'],
         index
       }))
@@ -147,7 +156,12 @@ export function extractWebManifestIcons (manifest) {
         const rank = icon => icon.purpose.includes('any') ? 0 : icon.purpose.includes('maskable') ? 1 : 2
         return rank(left) - rank(right) || left.index - right.index
       })
-      .map(({ href, kind }) => ({ href, kind }))
+      .map(({ href, kind, sizes, type }) => ({
+        href,
+        kind,
+        ...(sizes ? { sizes } : {}),
+        ...(type ? { type } : {})
+      }))
   } catch (_) {
     return []
   }
@@ -174,10 +188,26 @@ function filePath (file) {
 
 // Finds a conventional favicon file in a bundle.
 export function findFavicon (fileList) {
-  return fileList.find(file => {
+  const candidates = fileList.filter(file => {
     const filename = filePath(file).split('/').pop().toLowerCase()
-    return filename.startsWith('favicon.') && IMAGE_EXTENSIONS.test(filename)
-  }) || null
+    return CONVENTIONAL_ICON_BASENAME.test(filename) && IMAGE_EXTENSIONS.test(filename)
+  })
+  return candidates.sort((left, right) => iconQuality({}, filePath(right)) - iconQuality({}, filePath(left)))[0] || null
+}
+
+function iconQuality (source, path) {
+  const sizes = typeof source?.sizes === 'string' ? source.sizes.toLowerCase() : ''
+  const dimensions = [...sizes.matchAll(/(\d{1,5})x(\d{1,5})/g)]
+    .map(match => Math.min(Number(match[1]), Number(match[2])))
+  if (dimensions.length) return Math.max(...dimensions)
+  if (/\bany\b/.test(sizes) || /\.svg(?:[?#]|$)/i.test(path) || source?.type === 'image/svg+xml') return 512
+  const filename = path.split('/').pop()
+  const inferred = [...filename.matchAll(/(?:^|[-_.])(\d{2,5})x(\d{2,5})(?=[-_.]|$)/gi)]
+    .map(match => Math.min(Number(match[1]), Number(match[2])))
+  if (inferred.length) return Math.max(...inferred)
+  if (/^apple-touch-icon/i.test(filename) || source?.kind === 'apple-touch-icon') return 180
+  if (/\.ico$/i.test(filename)) return 32
+  return 1
 }
 
 // Finds the best local icon referenced by HTML or its Web App Manifest.
@@ -186,21 +216,32 @@ export async function findAppIcon (fileList, htmlContent, indexFile, readFileTex
   const indexPath = filePath(indexFile) || 'index.html'
   const byPath = new Map(fileList.map(file => [filePath(file), file]))
   const findFromSources = async sources => {
+    const candidates = []
+    let order = 0
     for (const source of sources) {
       const path = resolveAppPath(source.href, indexPath, metadata.baseHref)
       const file = path && byPath.get(path)
       if (!file) continue
-      if (source.kind !== 'manifest') return file
+      if (source.kind !== 'manifest') {
+        candidates.push({ file, quality: iconQuality(source, path), order: order++ })
+        continue
+      }
 
       try {
         const manifestText = readFileText ? await readFileText(file) : await file.text()
         for (const icon of extractWebManifestIcons(manifestText)) {
           const iconPath = resolveAppPath(icon.href, path)
-          if (iconPath && byPath.has(iconPath)) return byPath.get(iconPath)
+          if (iconPath && byPath.has(iconPath)) {
+            candidates.push({
+              file: byPath.get(iconPath),
+              quality: iconQuality(icon, iconPath),
+              order: order++
+            })
+          }
         }
       } catch (_) {}
     }
-    return null
+    return candidates.sort((left, right) => right.quality - left.quality || left.order - right.order)[0]?.file || null
   }
 
   const specificSources = metadata.iconSources.filter(source => !['tile-image', 'social-image'].includes(source.kind))

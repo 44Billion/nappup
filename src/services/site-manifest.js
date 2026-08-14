@@ -3,10 +3,12 @@ import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
 import { throttledSendEvent } from '#services/irfs-upload.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToBase16 } from '#helpers/base16.js'
+import { normalizeBlossomServerUrl, normalizeRelayUrl } from 'libp2r2p/url'
 
 const MANAGED_MANIFEST_TAGS = new Set([
   'd', 'service', 'path', 'r', 'name', 'summary', 'description', 'self',
-  'c', 'l', 't', 'auto', 'icon', 'key_art', 'screenshot', 'x', 'published_at'
+  'c', 'l', 't', 'auto', 'icon', 'key_art', 'screenshot', 'relay', 'server',
+  'x', 'published_at'
 ])
 
 export function normalizeManifestPath (value) {
@@ -169,9 +171,29 @@ function buildMetadataTags ({
   return tags
 }
 
+function normalizeServiceUrls (values, normalizer) {
+  const urls = []
+  for (const value of Array.isArray(values) ? values : []) {
+    try {
+      const normalized = normalizer(value)
+      if (!urls.includes(normalized)) urls.push(normalized)
+    } catch (_) {}
+  }
+  return urls
+}
+
+function buildSourceHintTags (sourceRelays, blossomServers) {
+  return [
+    ...normalizeServiceUrls(sourceRelays, normalizeRelayUrl)
+      .map(relay => ['relay', relay]),
+    ...normalizeServiceUrls(blossomServers, normalizeBlossomServerUrl)
+      .map(server => ['server', server])
+  ]
+}
+
 export function buildManifestTags ({
   dTag, uploadService, fileMetadata = [], icon, keyArt = [], screenshots = [],
-  previousTags = [], publishedAt, ...metadata
+  previousTags = [], publishedAt, sourceRelays = [], blossomServers = [], ...metadata
 }) {
   if (uploadService !== 'irfs' && uploadService !== 'blossom') {
     throw new Error('Unknown upload service')
@@ -199,6 +221,7 @@ export function buildManifestTags ({
     ['d', dTag],
     ...referenceTags,
     ['service', uploadService],
+    ...buildSourceHintTags(sourceRelays, blossomServers),
     ['x', aggregateHash, 'aggregate'],
     ['published_at', String(publishedAt)],
     ...buildMetadataTags({ ...metadata, hasIcon: Boolean(icon) }),

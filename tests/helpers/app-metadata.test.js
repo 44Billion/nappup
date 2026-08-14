@@ -83,7 +83,7 @@ describe('extractHtmlMetadata', () => {
 
     assert.equal(metadata.baseHref, '/assets/')
     assert.deepEqual(metadata.iconSources, [
-      { href: 'icon.svg?rev=1&mode=dark', kind: 'icon' },
+      { href: 'icon.svg?rev=1&mode=dark', kind: 'icon', sizes: 'any' },
       { href: 'touch.png', kind: 'apple-touch-icon' },
       { href: 'social.png', kind: 'social-image' },
       { href: 'twitter.png', kind: 'social-image' }
@@ -121,6 +121,24 @@ describe('app icon discovery', () => {
       index
     )
     assert.equal(found, icon)
+  })
+
+  it('prefers the largest declared app icon instead of the first low-resolution link', async () => {
+    const index = file('index.html')
+    const tiny = file('favicon-16x16.png')
+    const manifest = file('site.webmanifest', JSON.stringify({
+      icons: [
+        { src: 'icon-192.png', sizes: '192x192' },
+        { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
+      ]
+    }))
+    const large = file('icon-512.png')
+    const found = await findAppIcon(
+      [index, tiny, manifest, file('icon-192.png'), large],
+      '<link rel="icon" href="favicon-16x16.png" sizes="16x16"><link rel="manifest" href="site.webmanifest">',
+      index
+    )
+    assert.equal(found, large)
   })
 
   it('uses a conventional favicon before social preview images', async () => {
@@ -169,6 +187,12 @@ describe('findFavicon', () => {
     ]
     const favicon = findFavicon(files)
     assert.strictEqual(favicon, null)
+  })
+
+  it('prefers an Apple touch icon over a tiny conventional favicon', () => {
+    const tiny = { name: 'favicon-16x16.png' }
+    const touch = { name: 'apple-touch-icon.png' }
+    assert.equal(findFavicon([tiny, touch]), touch)
   })
 })
 

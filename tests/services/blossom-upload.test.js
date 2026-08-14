@@ -120,7 +120,9 @@ describe('blossom-upload', () => {
           created_at: 1700000000,
           content: '',
           tags: [
+            ['server', 'https://VALID.server/'],
             ['server', 'https://valid.server'],
+            ['server', 'https://valid.server/path'],
             ['d', 'something'],
             ['server', '']
           ],
