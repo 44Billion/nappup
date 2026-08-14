@@ -3,6 +3,27 @@ import nostrRelays from '#services/nostr-relays.js'
 import { bytesToBase16 } from '#helpers/base16.js'
 import { normalizeBlossomServerUrl } from 'libp2r2p/url'
 
+const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5000
+const DEFAULT_EXISTENCE_CHECK_TIMEOUT_MS = 5000
+
+// Bounds browser fetches whose native network timeout can take minutes.
+async function fetchWithTimeout (url, options, timeoutMs) {
+  const controller = new AbortController()
+  let timedOut = false
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } catch (error) {
+    if (timedOut) throw new Error(`request timed out after ${timeoutMs}ms`)
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 async function createAuthHeader (signer, modify) {
   const now = Math.floor(Date.now() / 1000)
   const event = {
@@ -43,13 +64,16 @@ export async function getBlossomServers (signer, writeRelays) {
 /**
  * Health-checks blossom servers with a simple HEAD request.
  * A server is considered healthy if fetch resolves (any HTTP status).
- * Only network-level errors mark a server as unreachable.
+ * Network errors and timeouts mark a server as unreachable.
  */
-export async function healthCheckServers (servers, signer, { log = () => {} } = {}) {
+export async function healthCheckServers (servers, signer, {
+  log = () => {},
+  timeoutMs = DEFAULT_HEALTH_CHECK_TIMEOUT_MS
+} = {}) {
   const results = await Promise.allSettled(
     servers.map(async (serverUrl) => {
       const normalized = normalizeBlossomServerUrl(serverUrl)
-      await fetch(normalized, { method: 'HEAD' })
+      await fetchWithTimeout(normalized, { method: 'HEAD', mode: 'no-cors' }, timeoutMs)
       return normalized
     })
   )
@@ -86,9 +110,17 @@ export async function computeFileHash (file) {
 async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, { shouldReupload, log, maxRetries = 5 }) {
   // Check if already uploaded
   if (!shouldReupload) {
-    const checkResponse = await fetch(`${serverUrl}/${fileHash}`, { method: 'HEAD' })
-    if (checkResponse.ok) {
-      return { success: true, alreadyExists: true }
+    try {
+      const checkResponse = await fetchWithTimeout(
+        `${serverUrl}/${fileHash}`,
+        { method: 'HEAD' },
+        DEFAULT_EXISTENCE_CHECK_TIMEOUT_MS
+      )
+      if (checkResponse.ok) {
+        return { success: true, alreadyExists: true }
+      }
+    } catch (error) {
+      log(`Could not check whether ${fileHash} exists on ${serverUrl}; uploading it anyway: ${error?.message ?? error}`)
     }
   }
 
@@ -184,7 +216,8 @@ export async function uploadFilesToBlossom ({
     }
   })
 
-  await Promise.allSettled(serverTasks)
+  // Unexpected task errors indicate a programming failure and must reach the caller.
+  await Promise.all(serverTasks)
 
   const uploadedFiles = []
   const failedFiles = []

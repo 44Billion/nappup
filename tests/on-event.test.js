@@ -74,7 +74,7 @@ describe('onEvent', () => {
     assert.equal(relayLog.includes(MOCK_PUBKEY), false)
   })
 
-  it('should emit init, file-uploaded, manifest-published, complete for a single file', async (t) => {
+  it('should emit upload phases for a single file', async (t) => {
     await setupMocks(t)
 
     const events = []
@@ -88,7 +88,13 @@ describe('onEvent', () => {
     })
 
     const types = events.map(e => e.type)
-    assert.deepEqual(types, ['init', 'file-uploaded', 'manifest-published', 'complete'])
+    assert.deepEqual(types, [
+      'services-checking',
+      'init',
+      'file-uploaded',
+      'manifest-published',
+      'complete'
+    ])
   })
 
   it('should include blossomCount, relayCount, totalFiles, dTag in init event', async (t) => {

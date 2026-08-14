@@ -185,6 +185,30 @@ describe('blossom-upload', () => {
       assert.ok(logs.some(l => l.includes('bad-server.test') && l.includes('unreachable')))
     })
 
+    it('should time out an unresponsive server without delaying healthy servers', async (t) => {
+      const originalFetch = globalThis.fetch
+      t.after(() => { globalThis.fetch = originalFetch })
+
+      globalThis.fetch = async (url, opts) => {
+        if (url.includes('slow-server')) {
+          return await new Promise((_resolve, reject) => {
+            opts.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+          })
+        }
+        return new Response(null, { status: 404 })
+      }
+
+      const logs = []
+      const healthy = await healthCheckServers(
+        ['https://slow-server.test', 'https://healthy-server.test'],
+        createMockSigner(),
+        { timeoutMs: 5, log: message => logs.push(message) }
+      )
+
+      assert.deepEqual(healthy, ['https://healthy-server.test'])
+      assert.ok(logs.some(log => log.includes('request timed out after 5ms')))
+    })
+
     it('should treat HTTP error responses as healthy (server is reachable)', async (t) => {
       const originalFetch = globalThis.fetch
       t.after(() => { globalThis.fetch = originalFetch })
@@ -289,6 +313,37 @@ describe('blossom-upload', () => {
       assert.equal(result.uploadedFiles[0].mimeType, 'text/html')
       assert.match(result.uploadedFiles[0].sha256, /^[a-f0-9]{64}$/)
       assert.ok(uploadedBlobs.length > 0)
+    })
+
+    it('should upload when the existence check is blocked by CORS', async (t) => {
+      const originalFetch = globalThis.fetch
+      t.after(() => { globalThis.fetch = originalFetch })
+
+      let uploadCalled = false
+      globalThis.fetch = async (_url, opts) => {
+        if (opts?.method === 'HEAD') throw new TypeError('Failed to fetch')
+        if (opts?.method === 'PUT') {
+          uploadCalled = true
+          return new Response(JSON.stringify({ sha256: 'a'.repeat(64) }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' }
+          })
+        }
+        return new Response(null, { status: 200 })
+      }
+
+      const logs = []
+      const result = await uploadFilesToBlossom({
+        fileList: [createFakeFile('hello world', 'index.html', 'text/html')],
+        servers: ['https://server.test'],
+        signer: createMockSigner(),
+        log: message => logs.push(message)
+      })
+
+      assert.equal(uploadCalled, true)
+      assert.equal(result.uploadedFiles.length, 1)
+      assert.equal(result.failedFiles.length, 0)
+      assert.ok(logs.some(log => log.includes('uploading it anyway')))
     })
 
     it('should skip upload when file already exists and shouldReupload is false', async (t) => {

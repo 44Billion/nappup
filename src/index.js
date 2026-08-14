@@ -43,6 +43,7 @@ export default async function (fileList, nostrSigner, opts = {}) {
  * Every event has `type` (string) and `progress` (0–100 integer).
  *
  * Event types:
+ *   'services-checking'  — Blossom preferences and server health are being checked
  *   'init'               — { totalFiles, totalSteps, dTag, relayCount, blossomCount }
  *   'media-uploaded'     — { mediaType: 'icon'|'key_art'|'screenshot', service: 'blossom'|'irfs'|null }
  *   'file-uploaded'      — { filename, service: 'blossom'|'irfs' }
@@ -182,6 +183,7 @@ async function publishApp (fileList, nostrSigner, {
   let isExplicitIcon = false
   let pause = 1000
 
+  emit({ type: 'services-checking' })
   log('Checking for blossom servers...')
   let blossomServerUrls = []
   try {
