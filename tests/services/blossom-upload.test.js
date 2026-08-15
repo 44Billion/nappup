@@ -492,6 +492,38 @@ describe('blossom-upload', () => {
       assert.equal(result.failedFiles.length, 0)
     })
 
+    it('should not retry when the signer denies the auth request', async (t) => {
+      const originalFetch = globalThis.fetch
+      t.after(() => { globalThis.fetch = originalFetch })
+
+      globalThis.fetch = async (url, opts) => {
+        if (opts?.method === 'HEAD') {
+          return new Response(null, { status: 404, statusText: 'Not Found' })
+        }
+        throw new Error('fetch should not be reached for upload')
+      }
+
+      let signCalls = 0
+      const signer = {
+        getPublicKey: () => 'a'.repeat(64),
+        signEvent: async () => {
+          signCalls++
+          throw new Error('Permission denied')
+        }
+      }
+
+      const result = await uploadFilesToBlossom({
+        fileList: [createFakeFile('content', 'app.js', 'application/javascript')],
+        servers: ['https://server1.test'],
+        signer,
+        maxRetries: 5
+      })
+
+      assert.equal(signCalls, 1)
+      assert.equal(result.failedFiles.length, 1)
+      assert.equal(result.failedFiles[0].errors[0].error.message, 'Permission denied')
+    })
+
     it('should upload to multiple servers in parallel', async (t) => {
       const originalFetch = globalThis.fetch
       t.after(() => { globalThis.fetch = originalFetch })

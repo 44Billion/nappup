@@ -12,6 +12,8 @@ export const NAPPUP_ERROR_CODES = Object.freeze({
   BLOSSOM_UPLOAD_FAILED: 'NAPPUP_BLOSSOM_UPLOAD_FAILED',
   IRFS_UPLOAD_FAILED: 'NAPPUP_IRFS_UPLOAD_FAILED',
   MANIFEST_UPLOAD_FAILED: 'NAPPUP_MANIFEST_UPLOAD_FAILED',
+  SIGNER_LOCKED: 'NAPPUP_SIGNER_LOCKED',
+  SIGNER_DENIED: 'NAPPUP_SIGNER_DENIED',
   UPLOAD_FAILED: 'NAPPUP_UPLOAD_FAILED'
 })
 
@@ -60,9 +62,51 @@ export class NappupError extends Error {
   }
 }
 
+const SIGNER_LOCKED_PATTERNS = [
+  /^VAULT_LOCKED$/,
+  /vault (?:is )?locked/i,
+  /account (?:is )?locked/i,
+  /wallet (?:is )?locked/i
+]
+
+const SIGNER_DENIED_PATTERNS = [
+  /permission denied/i,
+  /user (?:rejected|denied)/i,
+  /sign(?:ing)? request (?:rejected|denied)/i
+]
+
+// Walks the cause chain looking for signer-level failures such as a locked
+// vault or a rejected signing prompt. Returns a NAPPUP_* code or null.
+export function classifySignerError (error) {
+  let current = error
+  for (let depth = 0; current && depth < 6; depth++) {
+    if (current.name === 'NotAllowedError' || current.code === 'DENIED_BY_USER') {
+      return NAPPUP_ERROR_CODES.SIGNER_DENIED
+    }
+    const message = typeof current.message === 'string' ? current.message : ''
+    if (SIGNER_LOCKED_PATTERNS.some(pattern => pattern.test(message))) {
+      return NAPPUP_ERROR_CODES.SIGNER_LOCKED
+    }
+    if (SIGNER_DENIED_PATTERNS.some(pattern => pattern.test(message))) {
+      return NAPPUP_ERROR_CODES.SIGNER_DENIED
+    }
+    current = current.cause
+  }
+  return null
+}
+
 // Ensures every error crossing nappup's public API has a documented code.
 export function normalizeNappupError (error) {
-  if (typeof error?.code === 'string' && error.code.startsWith('NAPPUP_')) return error
+  if (typeof error?.code === 'string' && error.code.startsWith('NAPPUP_')) {
+    const signerCode = classifySignerError(error)
+    if (signerCode && signerCode !== error.code) {
+      return new NappupError(signerCode, error.message, {
+        cause: error.cause,
+        details: error.details
+      })
+    }
+    return error
+  }
   if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
     return new NappupError(
       NAPPUP_ERROR_CODES.UPLOAD_CANCELLED,
@@ -71,7 +115,7 @@ export function normalizeNappupError (error) {
     )
   }
   return new NappupError(
-    NAPPUP_ERROR_CODES.UPLOAD_FAILED,
+    classifySignerError(error) ?? NAPPUP_ERROR_CODES.UPLOAD_FAILED,
     error?.message || 'Upload failed',
     { cause: error }
   )

@@ -2,6 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import nostrRelays from '#services/nostr-relays.js'
 import { bytesToBase16 } from '#helpers/base16.js'
 import { normalizeBlossomServerUrl } from 'libp2r2p/url'
+import { classifySignerError } from '#errors.js'
 
 const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5000
 const DEFAULT_EXISTENCE_CHECK_TIMEOUT_MS = 5000
@@ -149,6 +150,12 @@ async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, 
       const descriptor = await response.json()
       return { success: true, descriptor }
     } catch (err) {
+      if (classifySignerError(err)) {
+        // Signer-level failures (locked vault, rejected prompt) are not
+        // transient upload errors: retrying would just re-prompt or fail
+        // again, so surface them immediately.
+        return { success: false, error: err }
+      }
       if (attempt === maxRetries) {
         return { success: false, error: err }
       }

@@ -6,6 +6,7 @@ import publishApp, {
   NAPPUP_ERROR_CODES,
   toApp
 } from '../src/index.js'
+import { classifySignerError, normalizeNappupError } from '../src/errors.js'
 
 function createSigner (getRelays = async () => ({ write: ['wss://relay.test'] })) {
   return { getRelays }
@@ -102,5 +103,68 @@ describe('public nappup errors', () => {
     assert.equal(events[0].type, 'error')
     assert.equal(events[0].error.code, NAPPUP_ERROR_CODES.NO_SIGNER)
     assert.equal(events[0].progress, 0)
+  })
+
+  it('classifies locked and denied signer failures through the cause chain', () => {
+    assert.equal(
+      classifySignerError(new Error('VAULT_LOCKED')),
+      NAPPUP_ERROR_CODES.SIGNER_LOCKED
+    )
+    assert.equal(
+      classifySignerError(new Error('Permission denied')),
+      NAPPUP_ERROR_CODES.SIGNER_DENIED
+    )
+    assert.equal(
+      classifySignerError(new Error('User rejected request')),
+      NAPPUP_ERROR_CODES.SIGNER_DENIED
+    )
+    const wrapped = new NappupError(
+      NAPPUP_ERROR_CODES.MANIFEST_UPLOAD_FAILED,
+      'Failed to publish the app manifest to Nostr relays',
+      { cause: new Error('VAULT_LOCKED') }
+    )
+    assert.equal(
+      classifySignerError(wrapped),
+      NAPPUP_ERROR_CODES.SIGNER_LOCKED
+    )
+    assert.equal(classifySignerError(new Error('relay refused the event')), null)
+  })
+
+  it('upgrades generic signer-step codes when the vault is locked', () => {
+    const cause = new Error('VAULT_LOCKED')
+    const error = new NappupError(
+      NAPPUP_ERROR_CODES.MANIFEST_UPLOAD_FAILED,
+      'Failed to publish the app manifest to Nostr relays',
+      { cause, details: { relay: 'wss://relay.test' } }
+    )
+
+    const normalized = normalizeNappupError(error)
+    assert.equal(normalized.code, NAPPUP_ERROR_CODES.SIGNER_LOCKED)
+    assert.equal(normalized.message, error.message)
+    assert.equal(normalized.cause, cause)
+    assert.deepEqual(normalized.details, { relay: 'wss://relay.test' })
+  })
+
+  it('upgrades generic signer-step codes when the prompt was denied', () => {
+    const cause = new Error('Permission denied')
+    const error = new NappupError(
+      NAPPUP_ERROR_CODES.IRFS_UPLOAD_FAILED,
+      'Failed to upload "app.js" to Nostr relays',
+      { cause }
+    )
+
+    const normalized = normalizeNappupError(error)
+    assert.equal(normalized.code, NAPPUP_ERROR_CODES.SIGNER_DENIED)
+    assert.equal(normalized.message, error.message)
+    assert.equal(normalized.cause, cause)
+  })
+
+  it('keeps unrelated coded errors unchanged', () => {
+    const error = new NappupError(
+      NAPPUP_ERROR_CODES.MANIFEST_UPLOAD_FAILED,
+      'Failed to publish the app manifest to Nostr relays',
+      { cause: new Error('relay refused the event') }
+    )
+    assert.equal(normalizeNappupError(error), error)
   })
 })

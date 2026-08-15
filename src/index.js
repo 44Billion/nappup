@@ -8,7 +8,7 @@ import { extractHtmlMetadata, findAppIcon, findIndexFile } from '#helpers/app-me
 import { getBlossomServers, healthCheckServers, uploadFilesToBlossom } from '#services/blossom-upload.js'
 import { uploadBinaryDataChunks } from '#services/irfs-upload.js'
 import { uploadSiteManifest } from '#services/site-manifest.js'
-import { NappupError, NAPPUP_ERROR_CODES, normalizeNappupError } from '#errors.js'
+import { NappupError, NAPPUP_ERROR_CODES, normalizeNappupError, classifySignerError } from '#errors.js'
 
 export { NappupError, NAPPUP_ERROR_CODES } from '#errors.js'
 
@@ -301,15 +301,18 @@ async function publishApp (fileList, nostrSigner, {
       log
     })
     if (failedFiles.length) {
+      const signerError = failedFiles
+        .flatMap(failed => failed.errors ?? [])
+        .map(failed => failed.error)
+        .find(error => classifySignerError(error))
+      const details = {
+        failedFileCount: failedFiles.length,
+        filenames: failedFiles.map(failed => failed.filename).filter(Boolean)
+      }
       throw new NappupError(
         NAPPUP_ERROR_CODES.BLOSSOM_UPLOAD_FAILED,
         `${failedFiles.length} file(s) failed to upload to Blossom`,
-        {
-          details: {
-            failedFileCount: failedFiles.length,
-            filenames: failedFiles.map(failed => failed.filename).filter(Boolean)
-          }
-        }
+        signerError ? { cause: signerError, details } : { details }
       )
     }
 

@@ -6,7 +6,7 @@
     "url": "git+https://github.com/44billion/nappup.git"
   },
   "license": "MIT",
-  "version": "2.3.7",
+  "version": "2.3.8",
   "description": "Nostr App Uploader",
   "type": "module",
   "scripts": {
