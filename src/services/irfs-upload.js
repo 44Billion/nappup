@@ -1,7 +1,8 @@
 import nostrRelays, { nappRelays, sendEventReport } from '#services/nostr-relays.js'
 import NMMR from 'nmmr'
 import { decode as base93Decode, encode as base93Encode } from 'libp2r2p/base93'
-import { stringifyEvent } from '#helpers/event.js'
+import { aggregateEventRelays } from '#helpers/event.js'
+import { formatRelayFailure } from '#helpers/relay-error.js'
 
 /**
  * Uploads binary data chunks for a file to Nostr relays using the InterRelay File System (IRFS).
@@ -37,7 +38,7 @@ export async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLen
     const validEvents = storedEvents.filter(event => isExpectedChunkEvent(event, { rootHash, index: chunk.index, total: chunk.total, dTag }))
       .sort(compareEventsNewestFirst)
     const foundEvent = validEvents[0]
-    const coveredRelays = new Set(validEvents.filter(event => event.id === foundEvent?.id).map(event => event.meta?.relay).filter(Boolean))
+    const coveredRelays = new Set(foundEvent?.meta.relays ?? [])
     const missingRelays = relays.filter(relay => !coveredRelays.has(relay))
 
     if (!shouldReupload && foundEvent) {
@@ -45,7 +46,7 @@ export async function uploadBinaryDataChunks ({ nmmr, signer, filename, chunkLen
         log(`${filename}: Skipping chunk ${++chunkIndex} of ${chunkLength} (already uploaded)`)
         continue
       }
-      log(`${filename}: Re-uploading chunk ${++chunkIndex} of ${chunkLength} to ${missingRelays.length} missing relays (out of ${relays.length})`)
+      log(`${filename}: Re-uploading chunk ${++chunkIndex} of ${chunkLength} to ${missingRelays.length} relays without a confirmed copy (out of ${relays.length})`)
       ;({ pause } = (await throttledSendEvent(foundEvent, missingRelays, { pause, log, trailingPause: true, minSuccessfulRelays: 0 })))
       continue
     }
@@ -114,7 +115,7 @@ function isExpectedChunkEvent (event, expected) {
  * Handles three error categories:
  * - Rate-limit errors: retries with increasing pause (+2000ms per retry)
  * - Timeout errors: one-time immediate retry
- * - Unretryable errors: logged and counted against success threshold
+ * - Other errors: no further automatic retry in this operation; counted against the success threshold
  *
  * @param {object} event - Signed Nostr event to send
  * @param {string[]} relays - Array of relay URLs
@@ -143,7 +144,7 @@ export async function throttledSendEvent (event, relays, {
     return { pause }
   }
 
-  const [rateLimitErrors, maybeUnretryableErrors, unretryableErrors] =
+  const [rateLimitErrors, timeoutErrors, noRetryErrors] =
     errors.reduce((r, v) => {
       const message = v.reason?.message ?? ''
       if (message.startsWith('rate-limited:')) r[0].push(v)
@@ -153,26 +154,28 @@ export async function throttledSendEvent (event, relays, {
     }, [[], [], []])
 
   // One-time special retry
-  if (maybeUnretryableErrors.length > 0) {
-    const timedOutRelays = maybeUnretryableErrors.map(v => v.relay)
-    log(`${maybeUnretryableErrors.length} timeout errors, retrying once after ${pause}ms:\n${maybeUnretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
+  if (timeoutErrors.length > 0) {
+    const timedOutRelays = timeoutErrors.map(v => v.relay)
+    log(`${timeoutErrors.length} timeout errors, retrying once after ${pause}ms:\n${timeoutErrors.map(formatRelayFailure).join('\n')}`)
     if (pause) await new Promise(resolve => setTimeout(resolve, pause))
     const { errors: timeoutRetryErrors } = await sendEventReport(event, timedOutRelays, { timeout: 15000, timeoutUntilFirstFulfillment: null })
-    unretryableErrors.push(...timeoutRetryErrors)
+    noRetryErrors.push(...timeoutRetryErrors)
   }
 
-  if (unretryableErrors.length > 0) {
-    log(`${unretryableErrors.length} unretryable errors:\n${unretryableErrors.map(v => `${v.relay}: ${v.reason.message}`).join('; ')}`)
-    console.log('Erroed event:', stringifyEvent(event))
+  if (noRetryErrors.length > 0) {
+    log(`${noRetryErrors.length} failures with no further automatic retry in this operation:\n${noRetryErrors.map(formatRelayFailure).join('\n')}`)
+    log(`Event: id=${event.id ?? 'unknown'} kind=${event.kind ?? 'unknown'}`)
   }
-  const maybeSuccessfulRelays = relays.length - unretryableErrors.length
+  const maybeSuccessfulRelays = relays.length - noRetryErrors.length
   const hasReachedMaxRetries = retries > maxRetries
   if (
     hasReachedMaxRetries ||
     maybeSuccessfulRelays < minSuccessfulRelays
   ) {
-    const finalErrors = [...rateLimitErrors, ...unretryableErrors]
-    throw new Error(finalErrors.map(v => `\n${v.relay}: ${v.reason}`).join('\n'))
+    const finalErrors = [...rateLimitErrors, ...noRetryErrors]
+    const error = new AggregateError(finalErrors.map(item => item.reason), finalErrors.map(formatRelayFailure).join('\n'))
+    error.failures = finalErrors
+    throw error
   }
 
   if (rateLimitErrors.length === 0) {
@@ -185,7 +188,7 @@ export async function throttledSendEvent (event, relays, {
   await new Promise(resolve => setTimeout(resolve, (pause += 2000)))
 
   // Subtracts the successful publishes from the original minSuccessfulRelays goal
-  minSuccessfulRelays = Math.max(0, minSuccessfulRelays - (relays.length - erroedRelays.length - unretryableErrors.length))
+  minSuccessfulRelays = Math.max(0, minSuccessfulRelays - (relays.length - erroedRelays.length - noRetryErrors.length))
   return await throttledSendEvent(event, erroedRelays, {
     pause, log, retries: ++retries, maxRetries, minSuccessfulRelays, leadingPause: false, trailingPause
   })
@@ -198,12 +201,12 @@ export async function getPreviousChunks (dTagValues, relays, signer) {
 
   for (let offset = 0; offset < dTagValues.length; offset += 100) {
     const batch = dTagValues.slice(offset, offset + 100)
-    const storedEvents = (await nostrRelays.getEvents({
+    const storedEvents = aggregateEventRelays((await nostrRelays.getEvents({
       kinds: [34601],
       authors: [pubkey],
       '#d': batch,
       limit: batch.length
-    }, targetRelays, { timeoutAfterFirstEose: null })).result
+    }, targetRelays, { timeoutAfterFirstEose: null, deduplicateAcrossRelays: false })).result)
 
     for (const event of storedEvents) {
       const dTag = event.tags?.find(tag => tag[0] === 'd')?.[1]

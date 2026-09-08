@@ -1,3 +1,4 @@
+import { aggregateEventRelays } from '#helpers/event.js'
 import { NAPP_CATEGORIES } from '#config/napp-categories.js'
 import nostrRelays, { nappRelays } from '#services/nostr-relays.js'
 import { throttledSendEvent } from '#services/irfs-upload.js'
@@ -249,12 +250,12 @@ export async function uploadSiteManifest ({
   const kind = manifestKind(channel)
   const relays = [...new Set([...(await signer.getRelays()).write, ...nappRelays]
     .map(relay => relay.trim().replace(/\/$/, '')))]
-  const events = (await nostrRelays.getEvents({
+  const events = aggregateEventRelays((await nostrRelays.getEvents({
     kinds: [kind],
     authors: [await signer.getPublicKey()],
     '#d': [dTag],
     limit: 1
-  }, relays, { timeoutAfterFirstEose: null })).result
+  }, relays, { timeoutAfterFirstEose: null, deduplicateAcrossRelays: false })).result)
   events.sort(newestFirst)
   const previous = events[0]
 
@@ -288,13 +289,10 @@ export async function uploadSiteManifest ({
   })
 
   if (!shouldReupload && previous && previous.content === '' && JSON.stringify(previous.tags) === JSON.stringify(tags)) {
-    const coveredRelays = new Set(events
-      .filter(event => event.id === previous.id)
-      .map(event => event.meta?.relay)
-      .filter(Boolean))
+    const coveredRelays = new Set(previous.meta.relays)
     const missingRelays = relays.filter(relay => !coveredRelays.has(relay))
     if (!missingRelays.length) return previous
-    log(`Re-uploading existing site manifest to ${missingRelays.length} missing relays`)
+    log(`Re-uploading existing site manifest to ${missingRelays.length} relays without a confirmed copy`)
     await throttledSendEvent(previous, missingRelays, {
       pause, trailingPause: true, log, minSuccessfulRelays: 0
     })

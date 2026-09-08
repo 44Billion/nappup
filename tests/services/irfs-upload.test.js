@@ -1,3 +1,4 @@
+import { isolateTemporaryDirectory } from '../helpers/temporary-directory.js'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import NMMR from 'nmmr'
@@ -136,3 +137,5 @@ describe('throttledSendEvent', () => {
     assert.equal(result.pause, 2000)
   })
 })
+
+isolateTemporaryDirectory()

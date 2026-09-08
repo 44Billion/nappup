@@ -1,3 +1,4 @@
+import { isolateTemporaryDirectory } from './helpers/temporary-directory.js'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { NAPPUP_ERROR_CODES, toApp } from '../src/index.js'
@@ -272,3 +273,5 @@ describe('onEvent', () => {
     )
   })
 })
+
+isolateTemporaryDirectory()

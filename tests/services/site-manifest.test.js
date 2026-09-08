@@ -206,7 +206,7 @@ describe('unified site manifest', () => {
       fileMetadata: [{ rootHash: ROOT_A, filename: 'index.html', size: 12 }]
     }
 
-    assert.equal(await uploadSiteManifest(options), previous)
+    assert.deepEqual(await uploadSiteManifest(options), { ...previous, meta: { relays: [] } })
     assert.equal(signed.length, 0)
     const forced = await uploadSiteManifest({ ...options, shouldReupload: true })
     assert.equal(signed.length, 1)

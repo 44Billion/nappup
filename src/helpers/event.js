@@ -1,3 +1,21 @@
+// Groups copies of the same signed event while retaining every observed origin.
+export function aggregateEventRelays (events) {
+  const byId = new Map()
+  for (const event of events) {
+    let entry = byId.get(event.id)
+    if (!entry) {
+      entry = { event: { ...event, meta: { relays: [] } }, relays: new Set() }
+      byId.set(event.id, entry)
+    }
+    const relay = event.meta?.relay
+    if (typeof relay === 'string' && relay && !entry.relays.has(relay)) {
+      entry.relays.add(relay)
+      entry.event.meta.relays.push(relay)
+    }
+  }
+  return [...byId.values()].map(entry => entry.event)
+}
+
 export function stringifyEvent (event) {
   event = { ...event }
 
