@@ -75,14 +75,27 @@ const SIGNER_DENIED_PATTERNS = [
   /sign(?:ing)? request (?:rejected|denied)/i
 ]
 
-// Walks the cause chain looking for signer-level failures such as a locked
-// vault or a rejected signing prompt. Returns a NAPPUP_* code or null.
+// Traverses native error trees without looping through cycles or unbounded causes.
+function * errorTree (error, seen = new Set(), depth = 0) {
+  if (!error || typeof error !== 'object' || seen.has(error) || depth >= 12) return
+  seen.add(error)
+  yield error
+  yield * errorTree(error.cause, seen, depth + 1)
+  if (Array.isArray(error.errors)) {
+    for (const child of error.errors) yield * errorTree(child, seen, depth + 1)
+  }
+}
+
+// Classifies original signer failures, not diagnostic text from servers or aggregates.
 export function classifySignerError (error) {
-  let current = error
-  for (let depth = 0; current && depth < 6; depth++) {
+  for (const current of errorTree(error)) {
     if (current.name === 'NotAllowedError' || current.code === 'DENIED_BY_USER') {
       return NAPPUP_ERROR_CODES.SIGNER_DENIED
     }
+    if (current.code === NAPPUP_ERROR_CODES.SIGNER_LOCKED || current.code === NAPPUP_ERROR_CODES.SIGNER_DENIED) {
+      return current.code
+    }
+    if (Array.isArray(current.errors) || current.category || current.code === 'BLOSSOM_HTTP_ERROR') continue
     const message = typeof current.message === 'string' ? current.message : ''
     if (SIGNER_LOCKED_PATTERNS.some(pattern => pattern.test(message))) {
       return NAPPUP_ERROR_CODES.SIGNER_LOCKED
@@ -90,20 +103,46 @@ export function classifySignerError (error) {
     if (SIGNER_DENIED_PATTERNS.some(pattern => pattern.test(message))) {
       return NAPPUP_ERROR_CODES.SIGNER_DENIED
     }
-    current = current.cause
   }
   return null
 }
 
+// Retains only failures of files with no confirmed Blossom copy.
+export function blossomUploadError (failedFiles) {
+  const failures = failedFiles.flatMap(file => (file.errors ?? []).map(({ server, error }) => ({
+    filename: file.filename, destination: server, reason: error
+  })))
+  return new NappupError(NAPPUP_ERROR_CODES.BLOSSOM_UPLOAD_FAILED,
+    `${failedFiles.length} file(s) failed to upload to Blossom`, {
+      cause: new AggregateError(failures.map(failure => failure.reason), 'Blossom destinations failed'),
+      details: {
+        failedFileCount: failedFiles.length,
+        filenames: failedFiles.map(file => file.filename).filter(Boolean),
+        failures
+      }
+    })
+}
+
+// Exposes destination failures consistently across Blossom and relay publication.
+function failureDetails (error) {
+  if (error?.details?.failures) return error.details
+  const failures = []
+  for (const current of errorTree(error)) {
+    if (!Array.isArray(current.failures)) continue
+    for (const { relay, reason } of current.failures) {
+      failures.push({ destination: relay, reason, ...(error?.details?.filename ? { filename: error.details.filename } : {}) })
+    }
+  }
+  return failures.length ? { ...error.details, failures } : error?.details
+}
+
 // Ensures every error crossing nappup's public API has a documented code.
 export function normalizeNappupError (error) {
+  const details = failureDetails(error)
   if (typeof error?.code === 'string' && error.code.startsWith('NAPPUP_')) {
-    const signerCode = classifySignerError(error)
-    if (signerCode && signerCode !== error.code) {
-      return new NappupError(signerCode, error.message, {
-        cause: error.cause,
-        details: error.details
-      })
+    const code = classifySignerError(error) ?? error.code
+    if (code !== error.code || details !== error.details) {
+      return new NappupError(code, error.message, { cause: error.cause, details })
     }
     return error
   }
@@ -111,12 +150,12 @@ export function normalizeNappupError (error) {
     return new NappupError(
       NAPPUP_ERROR_CODES.UPLOAD_CANCELLED,
       error?.message || 'Upload cancelled',
-      { cause: error }
+      { cause: error, details }
     )
   }
   return new NappupError(
     classifySignerError(error) ?? NAPPUP_ERROR_CODES.UPLOAD_FAILED,
     error?.message || 'Upload failed',
-    { cause: error }
+    { cause: error, details }
   )
 }

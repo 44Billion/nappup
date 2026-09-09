@@ -139,6 +139,7 @@ describe('bin/index.js', () => {
       assert.equal(await promise, 'sec')
       assert.equal(output.includes('sec'), false)
       assert.equal(input.isRaw, false)
+      assert.equal(input.readableFlowing, false)
     })
 
     it('cancels a hidden prompt and restores the terminal mode', async () => {
@@ -153,6 +154,7 @@ describe('bin/index.js', () => {
 
       await assert.rejects(promise, { code: 'ABORT_ERR' })
       assert.equal(input.isRaw, false)
+      assert.equal(input.readableFlowing, false)
     })
   })
 

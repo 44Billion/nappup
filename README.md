@@ -76,7 +76,10 @@ export DOTENV_PRIVATE_KEY_NAPPUP="$(nappup env keygen)"
 
 `env keygen` writes only the generated 64-character lowercase hex key to standard output, writes a reminder to standard error, and never reads or modifies `.env`. Store the result in a secret manager; nappup cannot recover it.
 
-Because encryption itself requires only the public key, the following command can safely replace the Nostr secret without receiving the private key:
+Encrypting a replacement requires only `DOTENV_PUBLIC_KEY_NAPPUP`. The command
+below receives the **new Nostr credential** (a secret key or bunker URL), but does
+not require `DOTENV_PRIVATE_KEY_NAPPUP`, the separate **dotenv decryption key**.
+It does not need to decrypt or know the previous Nostr credential:
 
 ```bash
 nappup env set NOSTR_SECRET_KEY
@@ -88,6 +91,39 @@ The interactive form hides and confirms the value. Redirected stdin and a positi
 Existing plaintext values are encrypted automatically when used. If an explicit private key does not match the stored public key, it becomes authoritative: recoverable values are re-encrypted and inaccessible credentials are reset with a warning naming only the affected variables. This can result in a new publisher identity or bunker client key.
 
 Use `DOTENV_CONFIG_PATH` to select a different dotenv file. The private key must come from the process environment or CLI and is rejected if stored inside that file.
+
+### Local development and shared credentials
+
+To use a checkout instead of the registry package:
+
+```bash
+cd /path/to/nappup
+npm link
+cd /path/to/app
+npm link nappup --no-save --package-lock=false
+```
+
+The second command links the app dependency and its local CLI to the global link.
+Projects that use nappup at runtime can keep a registry dependency for reproducible
+installs; local CLI-only projects may rely entirely on the link. `npm ci` removes
+local links, so repeat the second command afterward. When switching Node/npm
+installations, repeat both commands to register the checkout under the new global
+prefix as well.
+
+A link shares code, not credentials: `.env` still defaults to the current working
+directory. To use one existing encrypted identity across projects, export an
+absolute path to its dotenv file in the shells running nappup:
+
+```bash
+export DOTENV_CONFIG_PATH="/absolute/path/to/shared/nappup.env"
+nappup env set NOSTR_SECRET_KEY
+```
+
+Choose an existing file to retain its identity, or set the desired credential once
+in a new file. Supply the matching `DOTENV_PRIVATE_KEY_NAPPUP` if that file uses a
+custom encryption key. Changing credentials in a shared file affects every project
+using it; existing project `.env` files are not automatically merged or migrated.
+A process-level `NOSTR_SECRET_KEY` still takes precedence over the file.
 
 ### Examples
 
@@ -142,7 +178,22 @@ await publishApp(fileList, signer, {
 Rejected uploads use `NappupError`, with a stable code from
 `NAPPUP_ERROR_CODES`. The original error is retained as `cause`, and some
 errors include structured `details`, so applications can show their own
-recovery instructions without matching CLI-oriented message text:
+recovery instructions without matching CLI-oriented message text.
+
+For terminal destination failures, `error.details.failures` contains
+`{ destination, filename?, reason }` entries. `reason` retains the original error,
+including HTTP `status`, `retryable`, `retryAfterMs`, or relay `category` when
+available. Native causes and aggregated errors remain available for diagnostics.
+Signer failures are normalized to `NAPPUP_SIGNER_LOCKED` or `NAPPUP_SIGNER_DENIED`,
+including when nested inside an aggregate.
+
+A file succeeds when at least one destination confirms a copy (each chunk for
+IRFS). Failures of extra replicas are logged without emitting a terminal error.
+Publishing the app manifest still requires a confirmed copy. Display recovery
+instructions for rejected operations; use specific destination guidance only
+when it applies to all blocking failures. Different files may succeed on
+different servers.
+
 
 ```js
 import publishApp, { NAPPUP_ERROR_CODES } from 'nappup'

@@ -79,3 +79,18 @@ describe('nappup env keygen', () => {
     assert.equal(fs.existsSync(filePath), false)
   })
 })
+
+it('interactive env set exits while its terminal remains open', t => {
+  const python = spawnSync('python3', ['--version'])
+  if (python.error?.code === 'ENOENT' || process.platform === 'win32') return t.skip('Python 3 and POSIX PTY required')
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nappup-env-tty-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const env = { ...process.env, DOTENV_CONFIG_PATH: path.join(directory, '.env') }
+  delete env.NOSTR_SECRET_KEY
+  delete env.DOTENV_PRIVATE_KEY_NAPPUP
+  delete env.DOTENV_PUBLIC_KEY_NAPPUP
+  const result = spawnSync('python3', [path.resolve('tests/bin/nappup/env-set-tty.py'), process.execPath, path.resolve('bin/nappup/index.js')], { env, encoding: 'utf8', timeout: 15000 })
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /exited without closing stdin/)
+})

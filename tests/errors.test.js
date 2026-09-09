@@ -168,3 +168,38 @@ describe('public nappup errors', () => {
     assert.equal(normalizeNappupError(error), error)
   })
 })
+
+// Aggregate messages are diagnostic; signer classification must inspect original errors.
+describe('aggregate signer failures', () => {
+  for (const [reason, code] of [
+    [new Error('VAULT_LOCKED'), NAPPUP_ERROR_CODES.SIGNER_LOCKED],
+    [Object.assign(new Error(''), { code: 'DENIED_BY_USER' }), NAPPUP_ERROR_CODES.SIGNER_DENIED],
+    [Object.assign(new Error(''), { name: 'NotAllowedError' }), NAPPUP_ERROR_CODES.SIGNER_DENIED]
+  ]) {
+    it(`finds ${code} inside nested aggregates`, () => {
+      const cause = new AggregateError([new Error('wrapper', { cause: reason })], 'destinations failed')
+      cause.errors.push(cause)
+      const error = normalizeNappupError(new NappupError(NAPPUP_ERROR_CODES.MANIFEST_UPLOAD_FAILED, 'Publish failed', { cause }))
+      assert.equal(error.code, code)
+      assert.equal(error.cause, cause)
+    })
+  }
+
+  it('does not interpret server diagnostic text as a denied signing prompt', () => {
+    for (const reason of [
+      Object.assign(new Error('Permission denied'), { category: 'relay' }),
+      Object.assign(new Error('User rejected request'), { code: 'BLOSSOM_HTTP_ERROR', status: 403 })
+    ]) {
+      assert.equal(classifySignerError(new AggregateError([reason], reason.message)), null)
+    }
+  })
+
+  it('bounds traversal through deep and cyclic causes', () => {
+    const cycle = new Error('unknown')
+    cycle.cause = cycle
+    assert.equal(classifySignerError(cycle), null)
+    let deep = new Error('VAULT_LOCKED')
+    for (let i = 0; i < 30; i++) deep = new Error('wrapper', { cause: deep })
+    assert.equal(classifySignerError(deep), null)
+  })
+})

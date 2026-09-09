@@ -90,13 +90,14 @@ function parseEnvArgs (args) {
 function hiddenQuestion (query, { input, output }) {
   return new Promise((resolve, reject) => {
     const wasRaw = Boolean(input.isRaw)
-    const wasPaused = input.isPaused?.() ?? false
+    const wasFlowing = input.readableFlowing === true
     let value = ''
 
     function cleanup () {
       input.off('keypress', onKeypress)
       input.setRawMode(wasRaw)
-      if (wasPaused) input.pause()
+      // An untouched TTY has readableFlowing === null, not isPaused() === true.
+      if (!wasFlowing) input.pause()
     }
 
     function onKeypress (text, key = {}) {

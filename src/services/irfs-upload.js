@@ -168,6 +168,12 @@ export async function throttledSendEvent (event, relays, {
   }
   const maybeSuccessfulRelays = relays.length - noRetryErrors.length
   const hasReachedMaxRetries = retries > maxRetries
+  // Exhausted replication attempts cannot invalidate an already confirmed copy.
+  const confirmedRelays = relays.length - noRetryErrors.length - rateLimitErrors.length
+  if (hasReachedMaxRetries && confirmedRelays >= minSuccessfulRelays) {
+    log(`Replication retries exhausted; the required confirmations are already satisfied:\n${rateLimitErrors.map(formatRelayFailure).join('\n')}`)
+    return { pause }
+  }
   if (
     hasReachedMaxRetries ||
     maybeSuccessfulRelays < minSuccessfulRelays

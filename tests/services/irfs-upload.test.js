@@ -139,3 +139,26 @@ describe('throttledSendEvent', () => {
 })
 
 isolateTemporaryDirectory()
+
+// Exhausting optional replication cannot invalidate a previously accepted event.
+describe('replication exhaustion', () => {
+  for (const [minimum, acceptsFirst, shouldFail] of [[1, true, false], [0, false, false], [1, false, true]]) {
+    it(`keeps threshold ${minimum} after retries (initial success: ${acceptsFirst})`, async t => {
+      const relays = (await import('#services/nostr-relays.js')).default
+      const reason = Object.assign(new Error('rate-limited: slow down'), { category: 'relay' })
+      let calls = 0
+      t.mock.method(relays, 'sendEvent', async (_event, destinations) => {
+        calls++
+        return { errors: destinations.filter(relay => !(acceptsFirst && relay === 'accepted')).map(relay => ({ relay, reason })) }
+      })
+      const original = globalThis.setTimeout
+      t.mock.method(globalThis, 'setTimeout', (callback, _delay, ...args) => original(callback, 0, ...args))
+      const operation = throttledSendEvent({}, ['accepted', 'limited'], {
+        pause: 0, log: () => {}, maxRetries: 0, minSuccessfulRelays: minimum
+      })
+      if (shouldFail) await assert.rejects(operation, AggregateError)
+      else await operation
+      assert.equal(calls, 2)
+    })
+  }
+})
