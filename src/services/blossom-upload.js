@@ -53,7 +53,7 @@ export async function getBlossomServers (signer, writeRelays) {
     kinds: [10063],
     authors: [pubkey],
     limit: 1
-  }, writeRelays)).result
+  }, writeRelays)).result.map(({ event }) => event)
 
   if (events.length === 0) return []
 

@@ -131,7 +131,7 @@ describe('unified site manifest', () => {
       })
     }
     let returnedEvents = [previous]
-    t.mock.method(nostrRelays, 'getEvents', async () => ({ result: returnedEvents }))
+    t.mock.method(nostrRelays, 'getEvents', async () => ({ result: (returnedEvents).map(event => ({ event, relay: event.meta?.relay })) }))
     t.mock.method(nostrRelays, 'sendEvent', async () => ({ errors: [] }))
     t.mock.method(Date, 'now', () => 200000)
     const signed = []
@@ -165,7 +165,7 @@ describe('unified site manifest', () => {
       id: '1'.repeat(64), pubkey: 'f'.repeat(64), kind: 35128, created_at: 100, content: '',
       tags: [['d', 'app'], ['path', 'index.html', ROOT_A], ['service', 'blossom']]
     }
-    t.mock.method(nostrRelays, 'getEvents', async () => ({ result: [previous] }))
+    t.mock.method(nostrRelays, 'getEvents', async () => ({ result: ([previous]).map(event => ({ event, relay: event.meta?.relay })) }))
     t.mock.method(nostrRelays, 'sendEvent', async () => ({ errors: [] }))
     t.mock.method(Date, 'now', () => 200000)
     const signer = {
@@ -189,7 +189,7 @@ describe('unified site manifest', () => {
         fileMetadata: [{ rootHash: ROOT_A, filename: 'index.html', size: 12 }]
       })
     }
-    t.mock.method(nostrRelays, 'getEvents', async () => ({ result: [previous] }))
+    t.mock.method(nostrRelays, 'getEvents', async () => ({ result: ([previous]).map(event => ({ event, relay: event.meta?.relay })) }))
     t.mock.method(nostrRelays, 'sendEvent', async () => ({ errors: [] }))
     t.mock.method(Date, 'now', () => 200000)
     const signed = []

@@ -35,7 +35,7 @@ describe('blossom-upload', () => {
       const nostrRelays = nostrRelaysModule.default
 
       t.mock.method(nostrRelays, 'getEvents', async () => ({
-        result: [],
+        result: ([]).map(event => ({ event, relay: event.meta?.relay ?? 'wss://fixture.test' })),
         errors: [],
         success: true
       }))
@@ -50,7 +50,7 @@ describe('blossom-upload', () => {
       const nostrRelays = nostrRelaysModule.default
 
       t.mock.method(nostrRelays, 'getEvents', async () => ({
-        result: [{
+        result: ([{
           id: 'e'.repeat(64),
           pubkey: 'a'.repeat(64),
           kind: 10063,
@@ -61,7 +61,7 @@ describe('blossom-upload', () => {
             ['server', 'https://cdn.blossom.cloud/']
           ],
           sig: 'f'.repeat(128)
-        }],
+        }]).map(event => ({ event, relay: event.meta?.relay ?? 'wss://fixture.test' })),
         errors: [],
         success: true
       }))
@@ -79,7 +79,7 @@ describe('blossom-upload', () => {
       const nostrRelays = nostrRelaysModule.default
 
       t.mock.method(nostrRelays, 'getEvents', async () => ({
-        result: [
+        result: ([
           {
             id: '1'.repeat(64),
             pubkey: 'a'.repeat(64),
@@ -98,7 +98,7 @@ describe('blossom-upload', () => {
             tags: [['server', 'https://new.server']],
             sig: 'f'.repeat(128)
           }
-        ],
+        ]).map(event => ({ event, relay: event.meta?.relay ?? 'wss://fixture.test' })),
         errors: [],
         success: true
       }))
@@ -113,7 +113,7 @@ describe('blossom-upload', () => {
       const nostrRelays = nostrRelaysModule.default
 
       t.mock.method(nostrRelays, 'getEvents', async () => ({
-        result: [{
+        result: ([{
           id: 'e'.repeat(64),
           pubkey: 'a'.repeat(64),
           kind: 10063,
@@ -127,7 +127,7 @@ describe('blossom-upload', () => {
             ['server', '']
           ],
           sig: 'f'.repeat(128)
-        }],
+        }]).map(event => ({ event, relay: event.meta?.relay ?? 'wss://fixture.test' })),
         errors: [],
         success: true
       }))

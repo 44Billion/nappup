@@ -15,7 +15,7 @@ test('aggregation keeps versions and origins separate without mutating input met
     { id: 'new', meta: { relay: 'B' } }
   ]
   const before = structuredClone(events)
-  assert.deepEqual(aggregateEventRelays(events), [
+  assert.deepEqual(aggregateEventRelays(events.map(event => ({ event, relay: event.meta?.relay }))), [
     { id: 'old', meta: { relays: ['A'] } },
     { id: 'new', meta: { relays: ['B', 'C'] } }
   ])

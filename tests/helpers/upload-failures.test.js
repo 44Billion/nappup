@@ -13,7 +13,7 @@ const signer = {
 // Drives the public uploader with native File bodies and controlled destinations.
 function setup (t, statusForUpload, manifestReason) {
   t.mock.method(relays, 'getEvents', async filters => ({
-    result: filters.kinds.includes(10063) ? [{ tags: servers.map(server => ['server', server]) }] : [], errors: []
+    result: (filters.kinds.includes(10063) ? [{ tags: servers.map(server => ['server', server]) }] : []).map(event => ({ event, relay: event.meta?.relay ?? 'wss://fixture.test' })), errors: []
   }))
   t.mock.method(relays, 'sendEvent', async (_event, destinations) => ({
     errors: manifestReason ? destinations.map(relay => ({ relay, reason: manifestReason })) : []
