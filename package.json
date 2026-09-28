@@ -6,7 +6,7 @@
     "url": "git+https://github.com/44billion/nappup.git"
   },
   "license": "MIT",
-  "version": "2.3.11",
+  "version": "2.3.12",
   "description": "Nostr App Uploader",
   "type": "module",
   "scripts": {
@@ -22,9 +22,9 @@
     "@noble/hashes": "^2.0.0",
     "dotenv": "^17.2.0",
     "file-type": "^21.0.0",
-    "libp2r2p": "^0.10.19",
+    "libp2r2p": "^0.10.26",
     "mime-types": "^3.0.1",
-    "nmmr": "^2.0.0"
+    "nmmr": "^2.0.1"
   },
   "devDependencies": {
     "eslint": "^9.22.0",
