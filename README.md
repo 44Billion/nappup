@@ -206,3 +206,10 @@ try {
   }
 }
 ```
+
+## Relay retry timing
+
+Nostr relay timing is handled by libp2r2p 0.11.20: optional `params` is relative
+milliseconds or `@` Unix milliseconds. Cooldowns apply only to the refused
+EVENT/AUTH/REQ/COUNT type; publication failures do not block replication reads.
+Existing upload retry thresholds and HTTP Retry-After behavior are unchanged.

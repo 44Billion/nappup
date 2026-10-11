@@ -43,3 +43,10 @@ transports and disposable credentials, never the user's publisher identity.
   formatted aggregate message or a server's human-readable rejection text.
 - Validate the public boundary with `tests/helpers/upload-failures.test.js` and
   the retry thresholds with `tests/services/irfs-upload.test.js`.
+
+## Relay timing
+
+Consume libp2r2p ^0.11.20 through public imports. Nostr params and per-message-type
+cooldowns belong to the library; retain normalized native diagnostics and upload
+thresholds. Before publication, validate the exact prepared tarball; final locks
+use its real integrity and npm URL. HTTP Retry-After remains a separate contract.
