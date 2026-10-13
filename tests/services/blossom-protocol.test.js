@@ -69,16 +69,20 @@ test('Blossom honors Retry-After seconds and HTTP dates without parsing X-Reason
 
 test('Blossom does not retry earlier than an excessive Retry-After', async t => {
   const fetch = t.mock.method(globalThis, 'fetch', async () => response(429, { 'Retry-After': '120' }))
-  const result = await upload()
+  const logs = []
+  const result = await upload({ log: message => logs.push(message) })
   assert.equal(fetch.mock.callCount(), 1)
   assert.equal(result.failedFiles[0].errors[0].error.retryAfterMs, 120000)
+  assert.match(logs.at(-1), /app\.js: Failed to upload to https:\/\/example\.test .*\(429\).*no further automatic retry: Retry-After exceeds the 60000ms automatic wait budget/)
+  assert.ok(!logs.some(message => message.startsWith('Retrying')))
 })
 
 test('Blossom caps network retries and preserves the final cause', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const failure = new TypeError('connection reset')
   const fetch = t.mock.method(globalThis, 'fetch', async () => { throw failure })
-  const pending = upload({ maxRetries: 2 })
+  const logs = []
+  const pending = upload({ maxRetries: 2, log: message => logs.push(message) })
   await flush()
   t.mock.timers.tick(1000)
   await flush()
@@ -86,6 +90,53 @@ test('Blossom caps network retries and preserves the final cause', async t => {
   const result = await pending
   assert.equal(fetch.mock.callCount(), 3)
   assert.equal(result.failedFiles[0].errors[0].error, failure)
+  assert.match(logs.at(-1), /connection reset; no further automatic retry: attempt limit reached \(3\/3\)/)
+})
+
+test('Blossom retry logs retain file paths and causes across parallel servers and stop at 415', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const logs = []
+  const calls = { 'example.test': 0, 'replica.test': 0 }
+  t.mock.method(globalThis, 'fetch', async url => {
+    const host = new URL(url).hostname
+    const attempt = ++calls[host]
+    if (attempt === 1) throw new TypeError(host === 'example.test' ? 'fetch failed' : 'connection reset')
+    if (host === 'example.test' && attempt <= 3) {
+      return response(attempt === 2 ? 503 : 415, { 'X-Reason': attempt === 2 ? 'temporarily unavailable' : 'Unsupported Media Type' })
+    }
+    return response(201)
+  })
+  const script = { ...file(), webkitRelativePath: 'app/assets/app.js' }
+  const index = { ...file(), type: 'text/html', webkitRelativePath: 'app/index.html' }
+  const pending = upload({
+    fileList: [script, index], servers: ['https://example.test', 'https://replica.test'],
+    log: message => logs.push(message)
+  })
+  await flush()
+  t.mock.timers.tick(1000)
+  await flush()
+  t.mock.timers.tick(3000)
+  const result = await pending
+  assert.deepEqual(calls, { 'example.test': 4, 'replica.test': 3 })
+  assert.equal(result.uploadedFiles.length, 2)
+  assert.equal(result.failedFiles.length, 0)
+  assert.deepEqual(logs.filter(message => message.startsWith('Retrying')), [
+    'Retrying upload of assets/app.js to https://example.test in 1000ms (attempt 2/6): fetch failed',
+    'Retrying upload of assets/app.js to https://replica.test in 1000ms (attempt 2/6): connection reset',
+    'Retrying upload of assets/app.js to https://example.test in 3000ms (attempt 3/6): upload returned an error (503): temporarily unavailable'
+  ])
+  assert.ok(logs.includes(`assets/app.js: Failed to upload to https://example.test (text/javascript, ${script.size} bytes): upload returned an error (415): Unsupported Media Type; no further automatic retry: non-retryable error`))
+  assert.ok(logs.includes('index.html: Uploaded to https://example.test'))
+})
+
+test('Blossom logs cancellation without retrying or replacing the original error', async t => {
+  const error = new DOMException('request aborted', 'AbortError')
+  const fetch = t.mock.method(globalThis, 'fetch', async () => { throw error })
+  const logs = []
+  const result = await upload({ log: message => logs.push(message) })
+  assert.equal(fetch.mock.callCount(), 1)
+  assert.equal(result.failedFiles[0].errors[0].error, error)
+  assert.match(logs.at(-1), /request aborted; no further automatic retry: upload cancelled/)
 })
 
 test('Blossom timeout covers the response body and releases the request', async t => {

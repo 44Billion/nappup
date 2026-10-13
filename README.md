@@ -147,14 +147,10 @@ Force re-upload a draft:
 nappup ~/my-repos/projectx/build/projectx --draft -r
 ```
 
-## Programmatic Usage
+For retries, upload diagnostics and version identifiers, see
+[Publication details](docs/publication.md).
 
-Each published manifest includes an aggregate `x` tag that identifies the app
-version from its file path/hash mappings. Updating only manifest metadata or
-forcing a re-upload preserves that aggregate. The `published_at` tag records
-the first publication time of that aggregate and is preserved across later
-metadata revisions, while the event's `created_at` records the latest manifest
-revision.
+## Programmatic Usage
 
 Napp Up! also exports a function that works in both Node.js and the browser, so you can integrate app uploads directly into your own tooling:
 
@@ -180,21 +176,6 @@ Rejected uploads use `NappupError`, with a stable code from
 errors include structured `details`, so applications can show their own
 recovery instructions without matching CLI-oriented message text.
 
-For terminal destination failures, `error.details.failures` contains
-`{ destination, filename?, reason }` entries. `reason` retains the original error,
-including HTTP `status`, `retryable`, `retryAfterMs`, or relay `category` when
-available. Native causes and aggregated errors remain available for diagnostics.
-Signer failures are normalized to `NAPPUP_SIGNER_LOCKED` or `NAPPUP_SIGNER_DENIED`,
-including when nested inside an aggregate.
-
-A file succeeds when at least one destination confirms a copy (each chunk for
-IRFS). Failures of extra replicas are logged without emitting a terminal error.
-Publishing the app manifest still requires a confirmed copy. Display recovery
-instructions for rejected operations; use specific destination guidance only
-when it applies to all blocking failures. Different files may succeed on
-different servers.
-
-
 ```js
 import publishApp, { NAPPUP_ERROR_CODES } from 'nappup'
 
@@ -206,10 +187,3 @@ try {
   }
 }
 ```
-
-## Relay retry timing
-
-Nostr relay timing is handled by libp2r2p 0.11.20: optional `params` is relative
-milliseconds or `@` Unix milliseconds. Cooldowns apply only to the refused
-EVENT/AUTH/REQ/COUNT type; publication failures do not block replication reads.
-Existing upload retry thresholds and HTTP Retry-After behavior are unchanged.

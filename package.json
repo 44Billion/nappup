@@ -6,7 +6,7 @@
     "url": "git+https://github.com/44billion/nappup.git"
   },
   "license": "MIT",
-  "version": "2.3.13",
+  "version": "2.3.14",
   "description": "Nostr App Uploader",
   "type": "module",
   "scripts": {
@@ -52,6 +52,7 @@
   ],
   "files": [
     "src/**/*.js",
-    "bin/nappup/*.js"
+    "bin/nappup/*.js",
+    "docs/**/*.md"
   ]
 }

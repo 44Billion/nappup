@@ -333,8 +333,9 @@ describe('blossom-upload', () => {
       }
 
       const logs = []
+      const file = createFakeFile('hello world', 'pages/index.html', 'text/html')
       const result = await uploadFilesToBlossom({
-        fileList: [createFakeFile('hello world', 'index.html', 'text/html')],
+        fileList: [file],
         servers: ['https://server.test'],
         signer: createMockSigner(),
         log: message => logs.push(message)
@@ -343,7 +344,7 @@ describe('blossom-upload', () => {
       assert.equal(uploadCalled, true)
       assert.equal(result.uploadedFiles.length, 1)
       assert.equal(result.failedFiles.length, 0)
-      assert.ok(logs.some(log => log.includes('uploading it anyway')))
+      assert.ok(logs.includes(`Could not check whether pages/index.html (sha256=${await computeFileHash(file)}) exists on https://server.test; uploading it anyway: Failed to fetch`))
     })
 
     it('should skip upload when file already exists and shouldReupload is false', async (t) => {
@@ -504,6 +505,7 @@ describe('blossom-upload', () => {
       }
 
       let signCalls = 0
+      const logs = []
       const signer = {
         getPublicKey: () => 'a'.repeat(64),
         signEvent: async () => {
@@ -516,12 +518,14 @@ describe('blossom-upload', () => {
         fileList: [createFakeFile('content', 'app.js', 'application/javascript')],
         servers: ['https://server1.test'],
         signer,
-        maxRetries: 5
+        maxRetries: 5,
+        log: message => logs.push(message)
       })
 
       assert.equal(signCalls, 1)
       assert.equal(result.failedFiles.length, 1)
       assert.equal(result.failedFiles[0].errors[0].error.message, 'Permission denied')
+      assert.match(logs.at(-1), /Permission denied; no further automatic retry: signer rejected authorization/)
     })
 
     it('should upload to multiple servers in parallel', async (t) => {

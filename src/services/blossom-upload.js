@@ -142,9 +142,9 @@ async function readUploadResponse (response) {
 
 /**
  * Uploads a single file to a single blossom server with bounded retry+backoff.
- * Returns { success: true, descriptor } or { success: false, error }.
+ * Returns { success: true, descriptor } or { success: false, error, stopReason }.
  */
-async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, { shouldReupload, log, maxRetries = 5, uploadTimeoutMs }) {
+async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, { filename, shouldReupload, log, maxRetries = 5, uploadTimeoutMs }) {
   if (!shouldReupload) {
     try {
       const checkResponse = await fetchWithTimeout(
@@ -154,15 +154,16 @@ async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, 
       )
       if (checkResponse.ok) return { success: true, alreadyExists: true }
     } catch (error) {
-      log(`Could not check whether ${fileHash} exists on ${serverUrl}; uploading it anyway: ${error?.message ?? error}`)
+      log(`Could not check whether ${filename} (sha256=${fileHash}) exists on ${serverUrl}; uploading it anyway: ${error?.message ?? error}`)
     }
   }
 
   let pause = 1000
+  let previousError
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (attempt > 0) {
-        log(`Retrying upload to ${serverUrl} in ${pause}ms (attempt ${attempt + 1}/${maxRetries + 1})`)
+        log(`Retrying upload of ${filename} to ${serverUrl} in ${pause}ms (attempt ${attempt + 1}/${maxRetries + 1}): ${previousError?.message ?? previousError}`)
         await new Promise(resolve => setTimeout(resolve, pause))
       }
       const authorization = await createAuthHeader(signer, (evt) => {
@@ -184,17 +185,24 @@ async function uploadFileToServer (serverUrl, signer, file, fileHash, mimeType, 
       }, uploadTimeoutMs, readUploadResponse)
       return { success: true, descriptor }
     } catch (error) {
-      if (classifySignerError(error) || error.name === 'AbortError' || error.retryable === false || attempt === maxRetries) {
-        return { success: false, error }
-      }
+      const stopReason = classifySignerError(error)
+        ? 'signer rejected authorization'
+        : error.name === 'AbortError'
+          ? 'upload cancelled'
+          : error.retryable === false
+            ? 'non-retryable error'
+            : attempt === maxRetries
+              ? `attempt limit reached (${attempt + 1}/${maxRetries + 1})`
+              : null
+      if (stopReason) return { success: false, error, stopReason }
       if (error.retryAfterMs > MAX_RETRY_WAIT_MS) {
-        log(`${serverUrl}: Retry-After exceeds the ${MAX_RETRY_WAIT_MS}ms automatic wait budget; retry in a later operation`)
-        return { success: false, error }
+        return { success: false, error, stopReason: `Retry-After exceeds the ${MAX_RETRY_WAIT_MS}ms automatic wait budget; retry in a later operation` }
       }
+      previousError = error
       pause = Math.max(1000 + attempt * 2000, error.retryAfterMs || 0)
     }
   }
-  return { success: false, error: new Error('Max retries exceeded') }
+  return { success: false, error: new Error('Max retries exceeded'), stopReason: 'attempt limit reached' }
 }
 
 /**
@@ -241,7 +249,7 @@ export async function uploadFilesToBlossom ({
     for (let i = 0; i < fileInfos.length; i++) {
       const info = fileInfos[i]
       log(`Uploading ${info.filename} to ${serverUrl}`)
-      const result = await uploadFileToServer(serverUrl, signer, info.file, info.sha256, info.mimeType, { shouldReupload, log, maxRetries, uploadTimeoutMs })
+      const result = await uploadFileToServer(serverUrl, signer, info.file, info.sha256, info.mimeType, { filename: info.filename, shouldReupload, log, maxRetries, uploadTimeoutMs })
 
       if (result.success) {
         fileServerResults[i].successCount++
@@ -252,7 +260,7 @@ export async function uploadFilesToBlossom ({
         }
       } else {
         fileServerResults[i].errors.push({ server: serverUrl, error: result.error })
-        log(`${info.filename}: Failed to upload to ${serverUrl} (${info.mimeType}, ${info.file.size} bytes): ${result.error?.message ?? result.error}`)
+        log(`${info.filename}: Failed to upload to ${serverUrl} (${info.mimeType}, ${info.file.size} bytes): ${result.error?.message ?? result.error}; no further automatic retry: ${result.stopReason}`)
       }
     }
   })

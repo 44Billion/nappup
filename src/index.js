@@ -7,7 +7,8 @@ import { isNostrAppDTagSafe, GENERIC_BUILD_FOLDER_NAMES } from '#helpers/app.js'
 import { extractHtmlMetadata, findAppIcon, findIndexFile } from '#helpers/app-metadata.js'
 import { getBlossomServers, healthCheckServers, uploadFilesToBlossom } from '#services/blossom-upload.js'
 import { uploadBinaryDataChunks } from '#services/irfs-upload.js'
-import { uploadSiteManifest } from '#services/site-manifest.js'
+import { getManifestAggregateHash, uploadSiteManifest } from '#services/site-manifest.js'
+import { formatManifestVersion } from '#helpers/manifest-version.js'
 import { NappupError, NAPPUP_ERROR_CODES, normalizeNappupError, blossomUploadError } from '#errors.js'
 
 export { NappupError, NAPPUP_ERROR_CODES } from '#errors.js'
@@ -402,6 +403,9 @@ async function publishApp (fileList, nostrSigner, {
   })
   steps++
   emit({ type: 'manifest-published' })
+  const aggregateHash = getManifestAggregateHash(manifest)
+  log(`Version: v${formatManifestVersion(manifest, aggregateHash)}`)
+  log(`Version hash: ${aggregateHash}`)
   log(`Visit at https://44billion.net/${appEntity}`)
   emit({ type: 'complete', napp: appEntity })
 }
